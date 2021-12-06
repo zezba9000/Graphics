@@ -1,4 +1,4 @@
-Shader "HDRP/Lit"
+Shader "HDRP/LitSSS"
 {
     Properties
     {
@@ -65,6 +65,7 @@ Shader "HDRP/Lit"
 
         _SubsurfaceMask("Subsurface Radius", Range(0.0, 1.0)) = 1.0
         _SubsurfaceMaskMap("Subsurface Radius Map", 2D) = "white" {}
+        _CurvatureMap("Curvature Map", 2D) = "white" {}
         _Thickness("Thickness", Range(0.0, 1.0)) = 1.0
         _ThicknessMap("Thickness Map", 2D) = "white" {}
         _ThicknessRemap("Thickness Remap", Vector) = (0, 1, 0, 0)
@@ -230,9 +231,14 @@ Shader "HDRP/Lit"
 
     #include "Packages/com.unity.render-pipelines.high-definition-config/Runtime/ShaderConfig.cs.hlsl"
 
+    #define LIT_SSS_SHADER 1
+
     //-------------------------------------------------------------------------------------
     // Variant
     //-------------------------------------------------------------------------------------
+
+    #pragma multi_compile _ _OPTIONS_LITE
+    #pragma multi_compile _ALGORITHM_ANALYTIC _ALGORITHM_FIT
 
     #pragma shader_feature_local _ALPHATEST_ON
     #pragma shader_feature_local_fragment _DEPTHOFFSET_ON
@@ -899,14 +905,15 @@ Shader "HDRP/Lit"
             // - Provide sampling function for shadowmap, ies, cookie and reflection (depends on the specific use with the light loops like index array or atlas or single and texture format (cubemap/latlong))
 
             #define HAS_LIGHTLOOP
+            #define HAS_PENNER
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/LightLoop/LightLoopDef.hlsl"
-            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/Lit.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/LitSSS.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/LightLoop/LightLoop.hlsl"
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/ShaderPass/LitSharePass.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/LitData.hlsl"
-            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassForward.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassForwardSSS.hlsl"
 
             #pragma vertex Vert
             #pragma fragment Frag

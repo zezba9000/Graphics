@@ -153,6 +153,8 @@ namespace UnityEditor.Rendering.HighDefinition
 
         // Properties common to Unlit and Lit
         MaterialProperty surfaceType = null;
+        MaterialProperty options = null;
+        MaterialProperty radius = null, blur = null, area = null, algo = null;
 
         MaterialProperty alphaCutoffEnable = null;
         MaterialProperty useShadowThreshold = null;
@@ -283,6 +285,11 @@ namespace UnityEditor.Rendering.HighDefinition
         public override void LoadMaterialProperties()
         {
             surfaceType = FindProperty(kSurfaceType);
+            options = FindProperty("_Options");
+            radius = FindProperty("_Radius");
+            blur = FindProperty("_Blur");
+            area = FindProperty("_Area");
+            algo = FindProperty("_Algorithm");
             useShadowThreshold = FindProperty(kUseShadowThreshold);
             alphaCutoffEnable = FindProperty(kAlphaCutoffEnabled);
             alphaCutoff = FindProperty(kAlphaCutoff);
@@ -371,6 +378,25 @@ namespace UnityEditor.Rendering.HighDefinition
         /// </summary>
         protected override void OnGUIOpen()
         {
+            if (options != null)
+            {
+                materialEditor.ShaderProperty(options, "Options");
+                if (options.floatValue != 0.0f)
+                {
+                    materialEditor.ShaderProperty(algo, "Algorithm");
+                    //blur.floatValue = Mathf.Max(0.0f, Mathf.Min(blur.floatValue, 1.0f));
+                    materialEditor.ShaderProperty(radius, "Radius");
+                    if (radius.floatValue < 0.0f)
+                        radius.floatValue = 0.0f;
+                    materialEditor.ShaderProperty(blur, "Blur");
+                    if (blur.floatValue < 0.0f)
+                        blur.floatValue = 0.0f;
+                    materialEditor.ShaderProperty(area, "Area");
+                    if (area.floatValue < 0.0f)
+                        area.floatValue = 0.0f;
+                }
+            }
+
             if ((m_Features & Features.Surface) != 0)
                 DrawSurfaceGUI();
 

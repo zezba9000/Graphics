@@ -46,6 +46,11 @@ SAMPLER(sampler_SubsurfaceMaskMap);
 TEXTURE2D(_ThicknessMap);
 SAMPLER(sampler_ThicknessMap);
 
+#ifdef LIT_SSS_SHADER
+TEXTURE2D(_CurvatureMap);
+SAMPLER(sampler_CurvatureMap);
+#endif
+
 TEXTURE2D(_IridescenceThicknessMap);
 SAMPLER(sampler_IridescenceThicknessMap);
 
@@ -97,6 +102,10 @@ SAMPLER(sampler_LayerInfluenceMaskMap);
 #endif
 
 CBUFFER_START(UnityPerMaterial)
+
+float _Radius;
+float _Blur;
+float _Area;
 
 // shared constant between lit and layered lit
 float _AlphaCutoff;

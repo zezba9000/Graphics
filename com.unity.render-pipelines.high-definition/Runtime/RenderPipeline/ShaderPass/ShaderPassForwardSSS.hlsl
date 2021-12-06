@@ -139,6 +139,7 @@ void Frag(PackedVaryingsToPS packedInput
     BSDFData bsdfData = ConvertSurfaceDataToBSDFData(input.positionSS.xy, surfaceData);
 
     PreLightData preLightData = GetPreLightData(V, posInput, bsdfData);
+    preLightData.curvature = SAMPLE_TEXTURE2D(_CurvatureMap, sampler_CurvatureMap, input.texCoord0);
 
     outColor = float4(0.0, 0.0, 0.0, 0.0);
 

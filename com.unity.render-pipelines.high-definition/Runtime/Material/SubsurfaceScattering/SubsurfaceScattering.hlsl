@@ -21,6 +21,9 @@ uint GetSubsurfaceScatteringTexturingMode(int diffusionProfile)
 #elif defined(SHADERPASS) && ((SHADERPASS == SHADERPASS_RAYTRACING_INDIRECT) || (SHADERPASS == SHADERPASS_RAYTRACING_FORWARD))
     // If the SSS pass is executed, we know we have SSS enabled.
     bool enableSss = false;
+#elif SHADEROPTIONS_QUALITY_LITE
+    // For HDRP Lite, SSS is not done in screenspace
+    bool enableSss = false;
 #else
     bool enableSss = _EnableSubsurfaceScattering != 0;
 #endif
@@ -171,8 +174,13 @@ void FillMaterialSSS(uint diffusionProfileIndex, float subsurfaceMask, inout BSD
 {
     bsdfData.diffusionProfileIndex = diffusionProfileIndex;
     bsdfData.fresnel0 = _TransmissionTintsAndFresnel0[diffusionProfileIndex].a;
+    bsdfData.shapeParam = _ShapeParamsAndMaxScatterDists[diffusionProfileIndex].rgb;
+    bsdfData.worldScale = _WorldScalesAndFilterRadiiAndThicknessRemaps[diffusionProfileIndex].r;
+    bsdfData.filterRadius = _WorldScalesAndFilterRadiiAndThicknessRemaps[diffusionProfileIndex].g;
     bsdfData.subsurfaceMask = subsurfaceMask;
+#if !SHADEROPTIONS_QUALITY_LITE
     bsdfData.materialFeatures |= MATERIALFEATUREFLAGS_SSS_OUTPUT_SPLIT_LIGHTING;
+#endif
     bsdfData.materialFeatures |= GetSubsurfaceScatteringTexturingMode(diffusionProfileIndex) << MATERIALFEATUREFLAGS_SSS_TEXTURING_MODE_OFFSET;
 }
 
@@ -248,3 +256,54 @@ uint FindDiffusionProfileIndex(uint diffusionProfileHash)
 }
 
 #endif
+
+float3 IntegrateDiffuseScattering(float3 NdotL, float radius, float3 shapeParam, int steps)
+{
+	float limit = PI * 0.5f;
+	float inc = 2.0f * limit / (float)steps;
+
+    float3 theta = acos(NdotL);
+	float3 totalWeights = EvalBurleyDiffusionProfile(0, shapeParam);
+	float3 totalLight = totalWeights * saturate(cos(theta));
+	for (float x = -limit; x <= limit; x += inc)
+	{
+		float3 diffuse = saturate(cos(theta + x));
+		float dist = abs(2.0f * radius * sin(x * 0.5f));
+		float3 weights = EvalBurleyDiffusionProfile(dist, shapeParam);
+		//float3 weights = EvalGaussianDiffusionProfile(dist);
+
+		totalWeights += weights;
+		totalLight += diffuse * weights;
+	}
+	return saturate(totalLight / totalWeights);
+}
+
+float IntegrateDiffuseScattering(float NdotL, float radius, float shapeParam)
+{
+	float x = 0.5f + 0.5f * NdotL;
+	float y = 1.0f - (radius - 1.0f) / 15.0f;
+	float s = 1.0f / shapeParam;
+
+	float x2 = x * x;
+	float fit_a = x * (0.297809419735113f * x + 0.409123767595839f); // madd mul
+	float fit_b_1 = x2 * (2.55383104671677f * x2 - 0.479377197902363f) + 0.0891580536081126f * x; // madd mul madd
+	float fit_b_2 = x * 1.895f - 0.925f; // madd
+
+	float fit_b = x < 0.6339f ? fit_b_1 : fit_b_2;
+
+	float lambda_scat = s < 0.07748f ? 24 * s*s : 0.29f * (1 - 0.925 / (s + 0.17)) + 0.938;
+	float fit_min_scat_a = x < 0.55 ? saturate((x - 0.4)* (x - 0.4)* (x - 0.4) * 30) : 2 * x - 1;
+	float fit_min_scat_b = saturate(2 * x - 1);
+
+	fit_a = lerp(fit_min_scat_a, fit_a, lambda_scat);
+	fit_b = lerp(fit_min_scat_b, fit_min_scat_b, lambda_scat);
+
+	return lerp(fit_b, fit_a, y * y);
+}
+
+float3 IntegrateDiffuseScattering(float3 NdotL, float radius, float3 shapeParam)
+{
+    return float3(IntegrateDiffuseScattering(NdotL.x, radius, shapeParam.x),
+                  IntegrateDiffuseScattering(NdotL.y, radius, shapeParam.y),
+                  IntegrateDiffuseScattering(NdotL.z, radius, shapeParam.z));
+}
