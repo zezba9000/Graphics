@@ -62,7 +62,7 @@ public class HDRP_TestSettings : GraphicsTestSettings
         {
             try
             {
-                LogAssert.Expect(LogType.Error, "Metal: Error creating pipeline state (Hidden/HDRP/CopyDepthBuffer): depthAttachmentPixelFormat is not valid and shader writes to depth");
+                LogAssert.Expect(LogType.Error, "Metal: Error creating pipeline state (Hidden/HDRP/CopyDepthBuffer): depthAttachmentPixelFormat is not valid and shader writes to depth\n(null)");
             }
             catch (System.InvalidOperationException) // thrown if there is no logscope
             { }
