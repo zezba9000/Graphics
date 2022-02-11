@@ -59,7 +59,15 @@ public class HDRP_TestSettings : GraphicsTestSettings
         // Currently Camera.Render() fails on mac so we have to filter out the tests that rely on forceCameraRenderDuringSetup (like 2120 for APV).
         // But since setup is run regardless of the filter we add this explicit check on platform
         if (render && !Application.isPlaying)
+        {
+            try
+            {
+                LogAssert.Expect(LogType.Error, "Metal: Error creating pipeline state (Hidden/HDRP/CopyDepthBuffer): depthAttachmentPixelFormat is not valid and shader writes to depth");
+            }
+            catch (System.InvalidOperationException) // thrown if there is no logscope
+            { }
             Camera.main.Render();
+        }
     }
 
     static StringBuilder quitDebug = new StringBuilder();
