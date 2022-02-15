@@ -142,7 +142,7 @@ Linux64_{{ linux_api.name }}_{{ testplatform.name }}_{{ editor.version }}:
 {% endfor %}
 
 All_Fast:
-  name: All FAST CI
+  name: SceneViewGFXTestDef
   dependencies:
   {% for testplatform in testplatforms %}
   {% for editor in editors %}
