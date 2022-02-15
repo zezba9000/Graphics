@@ -37,7 +37,7 @@ Windows64_{{ win_api.name }}_{{ testplatform.name }}_{{ editor.version }}:
     - utr\utr {{ testplatform.args }} --testproject=TestProjects/SceneViewGFXTests --extra-editor-arg="{{ win_api.cmd }}" --editor-location=.Editor --artifacts_path=upm-ci~/test-results
     {% endif %}
   dependencies:
-    - .yamato/z_editor.yml#editor:priming:{{ editor.version }}:windows
+    - .yamato/_editor_priming.yml#editor:priming:{{ editor.version }}:Win
   artifacts:
     logs:
       paths:
@@ -71,7 +71,7 @@ OSX_Metal_Intel_{{ testplatform.name }}_{{ editor.version }}:
       scp -i ~/.ssh/id_rsa_macmini -o "StrictHostKeyChecking=no" -r bokken@$BOKKEN_DEVICE_IP:/Users/bokken/{{ projName }}/test-results/ test-results/
       exit $UTR_RESULT
   dependencies:
-    - .yamato/z_editor.yml#editor:priming:{{ editor.version }}:macos
+    - .yamato/_editor_priming.yml#editor:priming:{{ editor.version }}:OSX
   artifacts:
     logs:
       paths:
@@ -130,7 +130,7 @@ Linux64_{{ linux_api.name }}_{{ testplatform.name }}_{{ editor.version }}:
     - DISPLAY=:0.0 utr/utr --extra-editor-arg="{{ linux_api.cmd }}"  {{ testplatform.args }} --testproject=TestProjects/SceneViewGFXTests --editor-location=.Editor --artifacts_path=test-results
     {% endif %}
   dependencies:
-    - .yamato/z_editor.yml#editor:priming:{{ editor.version }}:linux
+    - .yamato/_editor_priming.yml#editor:priming:{{ editor.version }}:Linux
   artifacts:
     logs:
       paths:
