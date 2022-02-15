@@ -28,12 +28,11 @@ SceneViewGFXTests_Win_DX12_editmode_mono_Linear_trunk:
          retries: 2
       -  command: unity-downloader-cli --source-file unity_revision.txt -c editor -c il2cpp  --wait --published-only
          retries: 2
-      -  command: |5-
-                git rev-parse HEAD | git show -s --format=%%cI > revdate.tmp
-                set /p GIT_REVISIONDATE=<revdate.tmp
-                echo %GIT_REVISIONDATE%
-                del revdate.tmp
-                utr --artifacts_path=TestProjects/SceneViewGFXTests/test-results --editor-location=.Editor --extra-editor-arg="-colorspace=Linear" --extra-editor-arg="-force-d3d12" --platform=editmode --scripting-backend=Mono2x --suite=editor --testfilter=%TEST_FILTER% --testproject=./TestProjects/SceneViewGFXTests
+      -  command: git rev-parse HEAD | git show -s --format=%%cI > revdate.tmp
+      -  command: set /p GIT_REVISIONDATE=<revdate.tmp
+      -  command: echo %GIT_REVISIONDATE%
+      -  command: del revdate.tmp
+      -  command: utr --artifacts_path=TestProjects/SceneViewGFXTests/test-results --editor-location=.Editor --extra-editor-arg="-colorspace=Linear" --extra-editor-arg="-force-d3d12" --platform=editmode --scripting-backend=Mono2x --suite=editor --testfilter=%TEST_FILTER% --testproject=./TestProjects/SceneViewGFXTests
     artifacts:
         logs:
             paths:
