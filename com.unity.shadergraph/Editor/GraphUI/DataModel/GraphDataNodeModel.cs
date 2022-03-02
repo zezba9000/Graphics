@@ -221,7 +221,7 @@ namespace UnityEditor.ShaderGraph.GraphUI
                 DataTypeHandle = dataType,
                 Title = portName ?? "",
                 UniqueName = portId,
-                Options = options,
+                Options = options | PortModelOptions.NoEmbeddedConstant, // TODO: Temporary workaround for gradient type weirdness.
                 NodeModel = this,
                 AssetModel = AssetModel
             };
