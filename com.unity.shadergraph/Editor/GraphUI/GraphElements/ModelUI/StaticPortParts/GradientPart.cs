@@ -18,11 +18,13 @@ namespace UnityEditor.ShaderGraph.GraphUI
         protected override void UpdatePartFromPortReader(IPortReader reader)
         {
             var gradient = GradientTypeHelpers.GetGradient((IFieldReader)reader);
-            m_Field.value = gradient;
+            m_Field.SetValueWithoutNotify(gradient);
         }
 
         protected override void OnFieldValueChanged(ChangeEvent<Gradient> change)
         {
+            if (m_Model is not GraphDataNodeModel graphDataNodeModel) return;
+            m_OwnerElement.View.Dispatch(new SetGradientTypeValueCommand(graphDataNodeModel, m_PortName, change.newValue));
         }
     }
 }
