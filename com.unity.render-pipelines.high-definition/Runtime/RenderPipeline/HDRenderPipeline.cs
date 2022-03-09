@@ -2215,6 +2215,36 @@ namespace UnityEngine.Rendering.HighDefinition
             // Otherwise command would not be rendered in order.
             renderContext.ExecuteCommandBuffer(cmd);
             cmd.Clear();
+
+
+            if (bakeFGD)
+            {
+                // Require change m_PreIntegratedFGDMaterial format to R32G32B32A32_SFloat
+                // And change diffuse to LambertNoPI() in ImageBasedLighting.hlsl
+                // And change FGDTexture.Resolution
+                var texture = PreIntegratedFGD.instance.m_PreIntegratedFGD[(int)(PreIntegratedFGD.FGDIndex.FGD_GGXAndDisneyDiffuse)];
+                SaveTexture(texture, "Assets/Artifacts/FGD_Lambert.png");
+                bakeFGD = false;
+            }
+        }
+
+        static bool bakeFGD = false;
+        [UnityEditor.MenuItem("Tets/Generate FGD")]
+        static void OutputFGD()
+        {
+            bakeFGD = true;
+        }
+
+        static void SaveTexture(RenderTexture rt, string path)
+        {
+            RenderTexture.active = rt;
+            Texture2D tex = new Texture2D(rt.width, rt.height, GraphicsFormat.R32G32B32A32_SFloat, TextureCreationFlags.None);
+            tex.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0, false);
+            tex.Apply(false);
+            RenderTexture.active = null;
+
+            System.IO.File.WriteAllBytes(path, tex.EncodeToPNG());
+            UnityEditor.AssetDatabase.ImportAsset(path);
         }
 
         void SetupCameraProperties(HDCamera hdCamera, ScriptableRenderContext renderContext, CommandBuffer cmd)

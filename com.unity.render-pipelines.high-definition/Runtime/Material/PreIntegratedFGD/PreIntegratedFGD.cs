@@ -35,7 +35,7 @@ namespace UnityEngine.Rendering.HighDefinition
         int[] m_refCounting = new int[(int)FGDIndex.Count];
 
         Material[] m_PreIntegratedFGDMaterial = new Material[(int)FGDIndex.Count];
-        RenderTexture[] m_PreIntegratedFGD = new RenderTexture[(int)FGDIndex.Count];
+        public RenderTexture[] m_PreIntegratedFGD = new RenderTexture[(int)FGDIndex.Count];
 
         PreIntegratedFGD()
         {
