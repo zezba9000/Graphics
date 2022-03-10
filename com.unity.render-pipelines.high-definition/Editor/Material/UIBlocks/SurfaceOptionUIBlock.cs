@@ -155,6 +155,7 @@ namespace UnityEditor.Rendering.HighDefinition
         MaterialProperty surfaceType = null;
         MaterialProperty options = null;
         MaterialProperty radius = null, blur = null, area = null, algo = null;
+        MaterialProperty hdrp = null;
 
         MaterialProperty alphaCutoffEnable = null;
         MaterialProperty useShadowThreshold = null;
@@ -290,6 +291,7 @@ namespace UnityEditor.Rendering.HighDefinition
             blur = FindProperty("_Blur");
             area = FindProperty("_Area");
             algo = FindProperty("_Algorithm");
+            hdrp = FindProperty("HDRP");
             useShadowThreshold = FindProperty(kUseShadowThreshold);
             alphaCutoffEnable = FindProperty(kAlphaCutoffEnabled);
             alphaCutoff = FindProperty(kAlphaCutoff);
@@ -395,6 +397,11 @@ namespace UnityEditor.Rendering.HighDefinition
                     if (area.floatValue < 0.0f)
                         area.floatValue = 0.0f;
                 }
+            }
+
+            if (hdrp != null)
+            {
+                materialEditor.ShaderProperty(hdrp, "HDRP");
             }
 
             if ((m_Features & Features.Surface) != 0)

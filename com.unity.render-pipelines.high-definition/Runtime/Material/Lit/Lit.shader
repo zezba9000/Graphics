@@ -131,6 +131,8 @@ Shader "HDRP/Lit"
         [HideInInspector] _StencilRefMV("_StencilRefMV", Int) = 32 // StencilUsage.ObjectMotionVector
         [HideInInspector] _StencilWriteMaskMV("_StencilWriteMaskMV", Int) = 32 // StencilUsage.ObjectMotionVector
 
+        [KeywordEnum(Standard, Lite)] HDRP("HDRP", Int) = 0
+
         // Blending state
         _SurfaceType("__surfacetype", Float) = 0.0
         _BlendMode("__blendmode", Float) = 0.0
@@ -233,6 +235,8 @@ Shader "HDRP/Lit"
     //-------------------------------------------------------------------------------------
     // Variant
     //-------------------------------------------------------------------------------------
+
+    #pragma multi_compile HDRP_STANDARD HDRP_LITE
 
     #pragma shader_feature_local _ALPHATEST_ON
     #pragma shader_feature_local_fragment _DEPTHOFFSET_ON

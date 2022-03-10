@@ -2221,9 +2221,9 @@ namespace UnityEngine.Rendering.HighDefinition
             {
                 // Require change m_PreIntegratedFGDMaterial format to R32G32B32A32_SFloat
                 // And change diffuse to LambertNoPI() in ImageBasedLighting.hlsl
-                // And change FGDTexture.Resolution
+                // And change FGDTexture.Resolution as well as generated hlsl file
                 var texture = PreIntegratedFGD.instance.m_PreIntegratedFGD[(int)(PreIntegratedFGD.FGDIndex.FGD_GGXAndDisneyDiffuse)];
-                SaveTexture(texture, "Assets/Artifacts/FGD_Lambert.png");
+                SaveTexture(texture, "Assets/Artifacts/FGD_64.png");
                 bakeFGD = false;
             }
         }
