@@ -2,7 +2,7 @@
 
 TEXTURE2D(_PreIntegratedFGD_GGXDisneyDiffuse);
 
-float fgd_fit_F(float NdotV, float perceptualRoughness)
+float FGD_Fit_F(float NdotV, float perceptualRoughness)
 {
     const float a0 = 8.639877405353824;
     const float b0 = -3.1381963259563754;
@@ -26,6 +26,47 @@ float fgd_fit_F(float NdotV, float perceptualRoughness)
     return d / (c + b * exp(NdotV * a));
 }
 
+float FGD_Fit_G(float NdotV, float perceptualRoughness)
+{
+    const float a0 = 0.9745876192602081f;
+    const float a2 = -0.36245015983106055f;
+    const float b2 = 0.9008769726821249f;
+    const float c2 = -1.233668349677881f;
+
+    NdotV = min(NdotV, 0.87);
+    float NdotV2 = NdotV * NdotV;
+    float y = perceptualRoughness;
+
+    float a = a2 + c2 * y;
+    float b = a * NdotV + b2 * NdotV2;
+    return saturate(a0 + b * y);
+}
+
+float2 FGD_Lazarov(float NdotV, float perceptualRoughness)
+{
+    float x = (1-perceptualRoughness)*(1-perceptualRoughness);
+    float y = NdotV;
+
+    float b1 = -0.1688;
+    float b2 = 1.895;
+    float b3 = 0.9903;
+    float b4 = -4.853;
+    float b5 = 8.404;
+    float b6 = -5.069;
+    float bias = saturate( min( b1 * x + b2 * x * x, b3 + b4 * y + b5 * y * y + b6 * y * y * y ) );
+
+    float d0 = 0.6045;
+    float d1 = 1.699;
+    float d2 = -0.5228;
+    float d3 = -3.603;
+    float d4 = 1.404;
+    float d5 = 0.1939;
+    float d6 = 2.661;
+    float delta = saturate( d0 + d1 * x + d2 * y + d3 * x * x + d4 * x * y + d5 * y * y + d6 * x * x * x );
+
+    return float2(bias, delta);
+}
+
 // For image based lighting, a part of the BSDF is pre-integrated.
 // This is done both for specular GGX height-correlated and DisneyDiffuse
 // reflectivity is  Integral{(BSDF_GGX / F) - use for multiscattering
@@ -38,7 +79,10 @@ void GetPreIntegratedFGDGGXAndDisneyDiffuse(float NdotV, float perceptualRoughne
 
 #if HDRP_LITE
     // Function fits for FGD
-    preFGD.x = fgd_fit_F(NdotV, perceptualRoughness);
+    preFGD.x = FGD_Fit_F(NdotV, perceptualRoughness);
+    preFGD.y = FGD_Fit_G(NdotV, perceptualRoughness);
+#elif HDRP_LAZAROV
+    preFGD.xy = FGD_Lazarov(NdotV, perceptualRoughness);
 #endif
 
     // Pre-integrate GGX FGD
