@@ -23,6 +23,7 @@ SHADOW_TYPE SharpenShadowForPreIntegratedSSS(SHADOW_TYPE shadow, float sharpenin
     return Smoothstep01(falloff);
 }
 
+/*
 float3 IntegrateShadowScattering(DirectionalLightData light, SHADOW_TYPE shadow, float penumbraWidth, float3 shapeParam, int steps, int limit = 256)
 {
 	float inc = 2.0f * limit / (float)steps;
@@ -44,6 +45,7 @@ float3 IntegrateShadowScattering(DirectionalLightData light, SHADOW_TYPE shadow,
 	}
 	return saturate(totalLight / totalWeights);
 }
+*/
 #endif
 
 DirectLighting ShadeSurface_Infinitesimal(PreLightData preLightData, BSDFData bsdfData,

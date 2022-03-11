@@ -139,7 +139,12 @@ void Frag(PackedVaryingsToPS packedInput
     BSDFData bsdfData = ConvertSurfaceDataToBSDFData(input.positionSS.xy, surfaceData);
 
     PreLightData preLightData = GetPreLightData(V, posInput, bsdfData);
-    preLightData.curvature = SAMPLE_TEXTURE2D(_CurvatureMap, sampler_CurvatureMap, input.texCoord0);
+
+#if _CURVATUREMAP
+    preLightData.curvature = abs(SAMPLE_TEXTURE2D(_CurvatureMap, sampler_CurvatureMap, input.texCoord0) * 2 - 1);
+#else
+    preLightData.curvature = length(fwidth(surfaceData.geomNormalWS)) / length(fwidth(posInput.positionWS));
+#endif
 
     outColor = float4(0.0, 0.0, 0.0, 0.0);
 
@@ -164,10 +169,10 @@ void Frag(PackedVaryingsToPS packedInput
 
 #ifdef HAS_PENNER
             //result = length(fwidth(surfaceData.geomNormalWS)) / length(fwidth(posInput.positionWS));
-            result = preLightData.curvature / _Radius;
             if (_DebugFullScreenMode == FULLSCREENDEBUGMODE_VALIDATE_SPECULAR_COLOR)
-                result = abs(result * 2 - 1);
-                //result = (1.0f-renormFactor) * _Radius;
+                preLightData.curvature = length(fwidth(surfaceData.geomNormalWS)) / length(fwidth(posInput.positionWS)) / _CurvatureScale;
+
+            result = preLightData.curvature;
 #endif
 
             outColor = float4(result, 1.0f);

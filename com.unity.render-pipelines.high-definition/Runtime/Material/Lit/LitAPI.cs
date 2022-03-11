@@ -42,6 +42,11 @@ namespace UnityEngine.Rendering.HighDefinition
                 }
             }
 
+            if (material.HasProperty("_CurvatureMap"))
+            {
+                CoreUtils.SetKeyword(material, "_CURVATUREMAP", material.GetTexture("_CurvatureMap"));
+            }
+
             if (material.HasProperty(kMaskMap))
                 CoreUtils.SetKeyword(material, "_MASKMAP", material.GetTexture(kMaskMap));
 

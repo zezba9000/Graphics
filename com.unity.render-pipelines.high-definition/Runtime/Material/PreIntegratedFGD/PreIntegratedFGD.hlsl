@@ -73,7 +73,7 @@ void GetPreIntegratedFGDGGXAndDisneyDiffuse(float NdotV, float perceptualRoughne
 
     float3 preFGD = SAMPLE_TEXTURE2D_LOD(_PreIntegratedFGD_GGXDisneyDiffuse, s_linear_clamp_sampler, coordLUT, 0).xyz;
 
-#if HDRP_LITE
+#ifdef HDRP_LITE
     preFGD.x = FGD_Fit_F(NdotV, perceptualRoughness);
     preFGD.y = FGD_Fit_G(NdotV, perceptualRoughness);
     //preFGD.z = 1.0f; // if lambert diffuse

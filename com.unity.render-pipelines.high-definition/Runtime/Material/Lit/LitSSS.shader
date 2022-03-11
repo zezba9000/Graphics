@@ -2,6 +2,9 @@ Shader "HDRP/LitSSS"
 {
     Properties
     {
+        _CurvatureScale("Curvature Scale", Float) = 1
+        [KeywordEnum(Analytic, Fit)] _Algorithm("Algorithm", Float) = 1
+
         // Following set of parameters represent the parameters node inside the MaterialGraph.
         // They are use to fill a SurfaceData. With a MaterialGraph this should not exist.
 
@@ -35,10 +38,6 @@ Shader "HDRP/LitSSS"
         [HideInInspector] _HeightAmplitude("Height Amplitude", Float) = 0.02 // In world units. This will be computed in the UI.
         [HideInInspector] _HeightCenter("Height Center", Range(0.0, 1.0)) = 0.5 // In texture space
 
-        _Radius("radius", Float) = 1
-        _Blur("blur", Float) = 1
-        _Area("area", Float) = 1
-        [KeywordEnum(Analytic, Fit)] _Algorithm("Algorithm", Float) = 1
         [KeywordEnum(Default, Lite)] _Options("Shader Options", Int) = 0
         [Enum(MinMax, 0, Amplitude, 1)] _HeightMapParametrization("Heightmap Parametrization", Int) = 0
         // These parameters are for vertex displacement/Tessellation
@@ -227,17 +226,19 @@ Shader "HDRP/LitSSS"
     HLSLINCLUDE
 
     #pragma target 4.5
-    #pragma enable_d3d11_debug_symbols
+    //#pragma enable_d3d11_debug_symbols
 
     #include "Packages/com.unity.render-pipelines.high-definition-config/Runtime/ShaderConfig.cs.hlsl"
 
     #define LIT_SSS_SHADER 1
+    #define HDRP_LITE
 
     //-------------------------------------------------------------------------------------
     // Variant
     //-------------------------------------------------------------------------------------
 
     #pragma multi_compile _ _OPTIONS_LITE
+    #pragma multi_compile _ _CURVATUREMAP
     #pragma multi_compile _ALGORITHM_ANALYTIC _ALGORITHM_FIT
 
     #pragma shader_feature_local _ALPHATEST_ON

@@ -1433,7 +1433,7 @@ CBSDF EvaluateBSDF(float3 V, float3 L, PreLightData preLightData, BSDFData bsdfD
             dot(L, lerp(N_high, N_low, blur.b))
         );
 
-        float radius = _Radius / max(preLightData.curvature, 0.001);
+        float radius = MILLIMETERS_PER_METER * worldScale / max(preLightData.curvature, 0.001);
 
 #if _ALGORITHM_ANALYTIC
         diffRNdotL = IntegrateDiffuseScattering(NdotL_2, radius, bsdfData.shapeParam, 20);
