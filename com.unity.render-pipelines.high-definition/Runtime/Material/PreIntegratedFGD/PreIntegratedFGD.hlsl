@@ -4,26 +4,22 @@ TEXTURE2D(_PreIntegratedFGD_GGXDisneyDiffuse);
 
 float FGD_Fit_F(float NdotV, float perceptualRoughness)
 {
-    const float a0 = 8.639877405353824;
-    const float b0 = -3.1381963259563754;
-    const float c0 = 1.8836892049272869;
-    const float a1 = 0.8701752860749652;
-    const float b1 = -2.292256919092684;
-    const float c1 = 7.033675736966873;
-    const float a2 = 1.165252345324149;
-    const float b2 = 2.285565280188149;
-    const float c2 = 14.584919434419636;
-    const float a3 = 1.9870618038751404;
-    const float b3 = -1.3549509840179295;
+    const float a0 = 0.02047173f;
+    const float b0 = -0.56172166f;
+    const float c0 = 0.61822971f;
+    const float a1 = -2.64881573f;
+    const float b1 = 7.06815052f;
+    const float c1 = -4.77466956f;
+    const float o = 0.74117866f;
 
+    NdotV -= o;
+    perceptualRoughness = max(perceptualRoughness, 0.03);
     float roughness = perceptualRoughness * perceptualRoughness;
 
-    float a = a0 + b0 * perceptualRoughness + c0 * roughness;
-    float b = a1 + b1 * perceptualRoughness + c1 * roughness;
-    float c = a2 + b2 * perceptualRoughness + c2 * roughness;
-    float d = a3 + b3 * perceptualRoughness;
+    float b = a0 + b0 * perceptualRoughness + c0 * roughness;
+    float d = a1 + b1 * perceptualRoughness + c1 * roughness;
 
-    return d / (c + b * exp(NdotV * a));
+    return saturate((b + d * NdotV * NdotV) * NdotV);
 }
 
 float FGD_Fit_G(float NdotV, float perceptualRoughness)
@@ -78,9 +74,9 @@ void GetPreIntegratedFGDGGXAndDisneyDiffuse(float NdotV, float perceptualRoughne
     float3 preFGD = SAMPLE_TEXTURE2D_LOD(_PreIntegratedFGD_GGXDisneyDiffuse, s_linear_clamp_sampler, coordLUT, 0).xyz;
 
 #if HDRP_LITE
-    // Function fits for FGD
     preFGD.x = FGD_Fit_F(NdotV, perceptualRoughness);
     preFGD.y = FGD_Fit_G(NdotV, perceptualRoughness);
+    //preFGD.z = 1.0f; // if lambert diffuse
 #elif HDRP_LAZAROV
     preFGD.xy = FGD_Lazarov(NdotV, perceptualRoughness);
 #endif
