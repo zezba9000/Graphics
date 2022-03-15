@@ -374,6 +374,7 @@ namespace UnityEngine.Rendering.Universal
             }
             else
             {
+                // TODO RENDERGRAPH: update vertex shader and remove this SetViewProjectionMatrices. Otherwise, restore VP matricies right after the drawmesh call 
                 cmd.SetViewProjectionMatrices(Matrix4x4.identity, Matrix4x4.identity);
                 cmd.DrawMesh(RenderingUtils.fullscreenMesh, Matrix4x4.identity, material, 0, passIndex);
             }

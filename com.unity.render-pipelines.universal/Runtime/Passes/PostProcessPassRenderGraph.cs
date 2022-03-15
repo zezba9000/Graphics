@@ -756,6 +756,74 @@ namespace UnityEngine.Rendering.Universal
                 }
             }
         }
+
+        public void RenderFinalSetup(in TextureHandle source, in TextureHandle destination, ref RenderingData renderingData)
+        {
+            // FSR color onversion or FXAA
+        }
+
+        public void RenderFinalScale(in TextureHandle source, in TextureHandle destination, ref RenderingData renderingData)
+        {
+            // FSR upscale
+        }
+
+        public class PostProcessingFinalBlitPassData
+        {
+            public TextureHandle destinationTexture;
+            public TextureHandle sourceTexture;
+            public Material material;
+            public RenderingData renderingData;
+        }
+
+        public void RenderFinalBlit(in TextureHandle source, in TextureHandle destination, ref RenderingData renderingData)
+        {
+            var graph = renderingData.renderGraph;
+            UniversalRenderer renderer = (UniversalRenderer)renderingData.cameraData.renderer;
+            using (var builder = graph.AddRenderPass<PostProcessingFinalBlitPassData>("Postprocessing Final Blit Pass", out var passData, ProfilingSampler.Get(URPProfileId.DrawFullscreen)))
+            {
+                passData.destinationTexture = builder.UseColorBuffer(renderer.frameResources.backBufferColor, 0);
+                passData.sourceTexture = builder.ReadTexture(source);
+                passData.renderingData = renderingData;
+                passData.material = m_Materials.finalPass;
+
+                // TODO RENDERGRAPH: culling? force culluing off for testing
+                builder.AllowPassCulling(false);
+
+                builder.SetRenderFunc((PostProcessingFinalBlitPassData data, RenderGraphContext context) =>
+                {
+                    var cmd = data.renderingData.commandBuffer;
+                    var cameraData = data.renderingData.cameraData;
+                    var camera = data.renderingData.cameraData.camera;
+                    var source = data.sourceTexture;
+                    var material = data.material;
+
+                    cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, source);
+
+#if ENABLE_VR && ENABLE_XR_MODULE
+                    if (cameraData.xr.enabled)
+                    {
+                        bool yFlip = data.renderingData.cameraData.IsRenderTargetProjectionMatrixFlipped(data.destinationTexture);
+                        Vector4 scaleBias = yFlip ? new Vector4(1, -1, 0, 1) : new Vector4(1, 1, 0, 0);
+
+                        cmd.SetViewport(cameraData.pixelRect);
+                        cmd.SetGlobalVector(ShaderPropertyId.scaleBias, scaleBias);
+                        cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Quads, 4, 1, null);
+                    }
+                    else
+#endif
+                    {
+                        // TODO RENDERGRAPH: update vertex shader and remove this SetViewProjectionMatrices.
+                        cmd.SetViewProjectionMatrices(Matrix4x4.identity, Matrix4x4.identity);
+                        cmd.SetViewport(cameraData.pixelRect);
+                        cmd.DrawMesh(RenderingUtils.fullscreenMesh, Matrix4x4.identity, material);
+                        cmd.SetViewProjectionMatrices(cameraData.camera.worldToCameraMatrix, cameraData.camera.projectionMatrix);
+                    }
+                });
+
+                return;
+            }
+        }
+
         #endregion
     }
 }
