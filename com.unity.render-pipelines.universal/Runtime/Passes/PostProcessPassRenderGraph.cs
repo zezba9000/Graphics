@@ -447,6 +447,7 @@ namespace UnityEngine.Rendering.Universal
                     float maxCoC = (A * F) / (P - F);
                     float maxRadius = GetMaxBokehRadiusInPixels(cameraTargetDescriptor.height);
                     float rcpAspect = 1f / (wh / (float)hh);
+                    var cmd = renderingData.commandBuffer;
 
                     CoreUtils.SetKeyword(material, ShaderKeywordStrings.UseFastSRGBLinearConversion, m_UseFastSRGBLinearConversion);
                     // TODO RENDERGRAPH: should not call cmd here, move it into render graph renderfunc
@@ -590,6 +591,168 @@ namespace UnityEngine.Rendering.Universal
                             DrawFullscreenMesh(cmd, material, 4, data.renderingData.cameraData.xr.enabled);
                         });
                     }
+                }
+            }
+        }
+
+        public class PaniniProjectionPassData
+        {
+            public TextureHandle destinationTexture;
+            public TextureHandle sourceTexture;
+            public RenderingData renderingData;
+            public Material material;
+        }
+
+        public void RenderPaniniProjection(in TextureHandle source, out TextureHandle destination, ref RenderingData renderingData)
+        {
+            // TODO RENDERGRAPH: use helper function for setting up member vars
+            var stack = VolumeManager.instance.stack;
+            m_PaniniProjection = stack.GetComponent<PaniniProjection>();
+
+            var camera = renderingData.cameraData.camera;
+            var cmd = renderingData.commandBuffer;
+            var cameraData = renderingData.cameraData;
+            var graph = renderingData.renderGraph;
+            bool isSceneViewCamera = cameraData.isSceneViewCamera;
+
+            var cameraTargetDescriptor = cameraData.cameraTargetDescriptor;
+            var desc = PostProcessPass.GetCompatibleDescriptor(cameraTargetDescriptor,
+                cameraTargetDescriptor.width,
+                cameraTargetDescriptor.height,
+                cameraTargetDescriptor.graphicsFormat,
+                DepthBits.None);
+
+            destination = UniversalRenderer.CreateRenderGraphTexture(graph, desc, "_PaniniProjectionTarget", true);
+
+            bool usePaniniProjection = m_PaniniProjection.IsActive() && !isSceneViewCamera;
+            // Optional NaN killer before post-processing kicks in
+            // stopNaN may be null on Adreno 3xx. It doesn't support full shader level 3.5, but SystemInfo.graphicsShaderLevel is 35.
+            if (usePaniniProjection)
+            {
+                float distance = m_PaniniProjection.distance.value;
+                var viewExtents = CalcViewExtents(camera);
+                var cropExtents = CalcCropExtents(camera, distance);
+
+                float scaleX = cropExtents.x / viewExtents.x;
+                float scaleY = cropExtents.y / viewExtents.y;
+                float scaleF = Mathf.Min(scaleX, scaleY);
+
+                float paniniD = distance;
+                float paniniS = Mathf.Lerp(1f, Mathf.Clamp01(scaleF), m_PaniniProjection.cropToFit.value);
+
+                var material = m_Materials.paniniProjection;
+
+                material.SetVector(ShaderConstants._Params, new Vector4(viewExtents.x, viewExtents.y, paniniD, paniniS));
+                material.EnableKeyword(
+                    1f - Mathf.Abs(paniniD) > float.Epsilon
+                    ? ShaderKeywordStrings.PaniniGeneric : ShaderKeywordStrings.PaniniUnitDistance
+                );
+
+                using (var builder = graph.AddRenderPass<PaniniProjectionPassData>("Panini Projection", out var passData, ProfilingSampler.Get(URPProfileId.PaniniProjection)))
+                {
+                    passData.destinationTexture = builder.UseColorBuffer(destination, 0);
+                    passData.sourceTexture = builder.ReadTexture(source);
+                    passData.renderingData = renderingData;
+                    passData.material = material;
+
+                    // TODO RENDERGRAPH: culling? force culluing off for testing
+                    builder.AllowPassCulling(false);
+
+                    builder.SetRenderFunc((PaniniProjectionPassData data, RenderGraphContext context) =>
+                    {
+                        var cmd = data.renderingData.commandBuffer;
+                        // TODO RENDERGRAPH: BlitDstDiscardContent
+                        cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, data.sourceTexture);
+                        DrawFullscreenMesh(cmd, material, 0, data.renderingData.cameraData.xr.enabled);
+                    });
+
+                    return;
+                }
+            }
+        }
+
+        public class LensFlarePassData
+        {
+            public TextureHandle destinationTexture;
+            public RenderingData renderingData;
+            public Material material;
+            public bool usePanini;
+            public float paniniDistance;
+            public float paniniCropToFit;
+        }
+
+        public void RenderLensFlareDatadriven(in TextureHandle destination, ref RenderingData renderingData)
+        {
+            // TODO RENDERGRAPH: use helper function for setting up member vars
+            var stack = VolumeManager.instance.stack;
+            m_PaniniProjection = stack.GetComponent<PaniniProjection>();
+            bool useLensFlare = !LensFlareCommonSRP.Instance.IsEmpty();
+
+            if (useLensFlare)
+            {
+                bool usePanini;
+                float paniniDistance;
+                float paniniCropToFit;
+                if (m_PaniniProjection.IsActive())
+                {
+                    usePanini = true;
+                    paniniDistance = m_PaniniProjection.distance.value;
+                    paniniCropToFit = m_PaniniProjection.cropToFit.value;
+                }
+                else
+                {
+                    usePanini = false;
+                    paniniDistance = 1.0f;
+                    paniniCropToFit = 1.0f;
+                }
+
+                var graph = renderingData.renderGraph;
+                using (var builder = graph.AddRenderPass<LensFlarePassData>("Lens Flare Pass", out var passData, ProfilingSampler.Get(URPProfileId.LensFlareDataDriven)))
+                {
+                    // TODO RENDERGRAPH: call WriteTexture here because DoLensFlareDataDrivenCommon will call SetRenderTarget internally.
+                    passData.destinationTexture = builder.WriteTexture(destination);
+                    passData.renderingData = renderingData;
+                    passData.material = m_Materials.lensFlareDataDriven;
+                    passData.usePanini = usePanini;
+                    passData.paniniDistance = paniniDistance;
+                    passData.paniniCropToFit = paniniCropToFit;
+
+                    // TODO RENDERGRAPH: culling? force culluing off for testing
+                    builder.AllowPassCulling(false);
+
+                    builder.SetRenderFunc((LensFlarePassData data, RenderGraphContext context) =>
+                    {
+                        var cmd = data.renderingData.commandBuffer;
+                        var camera = data.renderingData.cameraData.camera;
+                        var cameraTargetDescriptor = data.renderingData.cameraData.cameraTargetDescriptor;
+                        var usePanini = data.usePanini;
+                        var paniniDistance = data.paniniDistance;
+                        var paniniCropToFit = data.paniniCropToFit;
+                        var destination = data.destinationTexture;
+                        var material = data.material;
+
+                        var gpuView = camera.worldToCameraMatrix;
+                        var gpuNonJitteredProj = GL.GetGPUProjectionMatrix(camera.projectionMatrix, true);
+                        // Zero out the translation component.
+                        gpuView.SetColumn(3, new Vector4(0, 0, 0, 1));
+                        var gpuVP = gpuNonJitteredProj * camera.worldToCameraMatrix;
+
+                        // TODO RENDERGRAPH: DoLensFlareDataDrivenCommon will call set render target internally. Remove the set render target call?
+                        // TODO RENDERGRAPH: LensFlareCommonSRP internally manages RTHandle occlusionRT, we should properly register this RTHandle to RenderGraph
+                        LensFlareCommonSRP.DoLensFlareDataDrivenCommon(material, LensFlareCommonSRP.Instance, camera, (float)cameraTargetDescriptor.width, (float)cameraTargetDescriptor.height,
+                            usePanini, paniniDistance, paniniCropToFit,
+                            true,
+                            camera.transform.position,
+                            gpuVP,
+                            cmd, destination,
+                            (Light light, Camera cam, Vector3 wo) => { return GetLensFlareLightAttenuation(light, cam, wo); },
+                            ShaderConstants._FlareOcclusionTex, ShaderConstants._FlareOcclusionIndex,
+                            ShaderConstants._FlareTex, ShaderConstants._FlareColorValue,
+                            ShaderConstants._FlareData0, ShaderConstants._FlareData1, ShaderConstants._FlareData2, ShaderConstants._FlareData3, ShaderConstants._FlareData4,
+                            false);
+                    });
+
+                    return;
                 }
             }
         }
