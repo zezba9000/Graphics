@@ -28,6 +28,7 @@
 #define DEBUGVIEW_EYE_SURFACEDATA_MASK (1512)
 #define DEBUGVIEW_EYE_SURFACEDATA_DIFFUSION_PROFILE_HASH (1513)
 #define DEBUGVIEW_EYE_SURFACEDATA_SUBSURFACE_MASK (1514)
+#define DEBUGVIEW_EYE_SURFACEDATA_CURVATURE (1515)
 
 //
 // UnityEngine.Rendering.HighDefinition.Eye+BSDFData:  static fields
@@ -48,7 +49,11 @@
 #define DEBUGVIEW_EYE_BSDFDATA_MASK (1563)
 #define DEBUGVIEW_EYE_BSDFDATA_DIFFUSION_PROFILE_INDEX (1564)
 #define DEBUGVIEW_EYE_BSDFDATA_SUBSURFACE_MASK (1565)
-#define DEBUGVIEW_EYE_BSDFDATA_ROUGHNESS (1566)
+#define DEBUGVIEW_EYE_BSDFDATA_SHAPE_PARAM (1566)
+#define DEBUGVIEW_EYE_BSDFDATA_WORLD_SCALE (1567)
+#define DEBUGVIEW_EYE_BSDFDATA_FILTER_RADIUS (1568)
+#define DEBUGVIEW_EYE_BSDFDATA_CURVATURE (1569)
+#define DEBUGVIEW_EYE_BSDFDATA_ROUGHNESS (1570)
 
 // Generated from UnityEngine.Rendering.HighDefinition.Eye+SurfaceData
 // PackingRules = Exact
@@ -66,6 +71,7 @@ struct SurfaceData
     float2 mask;
     uint diffusionProfileHash;
     float subsurfaceMask;
+    float curvature;
 };
 
 // Generated from UnityEngine.Rendering.HighDefinition.Eye+BSDFData
@@ -85,6 +91,10 @@ struct BSDFData
     float2 mask;
     uint diffusionProfileIndex;
     float subsurfaceMask;
+    float3 shapeParam;
+    float worldScale;
+    float filterRadius;
+    float curvature;
     float roughness;
 };
 
@@ -142,6 +152,9 @@ void GetGeneratedSurfaceDataDebug(uint paramId, SurfaceData surfacedata, inout f
             break;
         case DEBUGVIEW_EYE_SURFACEDATA_SUBSURFACE_MASK:
             result = surfacedata.subsurfaceMask.xxx;
+            break;
+        case DEBUGVIEW_EYE_SURFACEDATA_CURVATURE:
+            result = surfacedata.curvature.xxx;
             break;
     }
 }
@@ -201,6 +214,18 @@ void GetGeneratedBSDFDataDebug(uint paramId, BSDFData bsdfdata, inout float3 res
             break;
         case DEBUGVIEW_EYE_BSDFDATA_SUBSURFACE_MASK:
             result = bsdfdata.subsurfaceMask.xxx;
+            break;
+        case DEBUGVIEW_EYE_BSDFDATA_SHAPE_PARAM:
+            result = bsdfdata.shapeParam;
+            break;
+        case DEBUGVIEW_EYE_BSDFDATA_WORLD_SCALE:
+            result = bsdfdata.worldScale.xxx;
+            break;
+        case DEBUGVIEW_EYE_BSDFDATA_FILTER_RADIUS:
+            result = bsdfdata.filterRadius.xxx;
+            break;
+        case DEBUGVIEW_EYE_BSDFDATA_CURVATURE:
+            result = bsdfdata.curvature.xxx;
             break;
         case DEBUGVIEW_EYE_BSDFDATA_ROUGHNESS:
             result = bsdfdata.roughness.xxx;

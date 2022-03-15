@@ -71,6 +71,9 @@ namespace UnityEngine.Rendering.HighDefinition
             [SurfaceDataAttributes("Subsurface Mask", precision = FieldPrecision.Real)]
             public float subsurfaceMask;
 
+            // Penner SSS
+            public float curvature;
+
             // Transmission
             // + Diffusion Profile
             [SurfaceDataAttributes("Thickness", precision = FieldPrecision.Real)]
@@ -140,6 +143,12 @@ namespace UnityEngine.Rendering.HighDefinition
             public uint diffusionProfileIndex;
             [SurfaceDataAttributes(precision = FieldPrecision.Real)]
             public float subsurfaceMask;
+
+            // Penner SSS
+            public Vector3 shapeParam;
+            public float worldScale;
+            public float filterRadius;
+            public float curvature;
 
             // Transmission
             // + Diffusion Profile

@@ -1,7 +1,10 @@
-Shader "HDRP/Lit"
+Shader "HDRP/LitSSS"
 {
     Properties
     {
+        _CurvatureScale("Curvature Scale", Range(0.0, 8.0)) = 1
+        [KeywordEnum(Analytic, Fit)] _Algorithm("Algorithm", Float) = 1
+
         // Following set of parameters represent the parameters node inside the MaterialGraph.
         // They are use to fill a SurfaceData. With a MaterialGraph this should not exist.
 
@@ -60,6 +63,7 @@ Shader "HDRP/Lit"
 
         _SubsurfaceMask("Subsurface Radius", Range(0.0, 1.0)) = 1.0
         _SubsurfaceMaskMap("Subsurface Radius Map", 2D) = "white" {}
+        _CurvatureMap("Curvature Map", 2D) = "white" {}
         _Thickness("Thickness", Range(0.0, 1.0)) = 1.0
         _ThicknessMap("Thickness Map", 2D) = "white" {}
         _ThicknessRemap("Thickness Remap", Vector) = (0, 1, 0, 0)
@@ -125,8 +129,6 @@ Shader "HDRP/Lit"
         // Motion vector pass
         [HideInInspector] _StencilRefMV("_StencilRefMV", Int) = 32 // StencilUsage.ObjectMotionVector
         [HideInInspector] _StencilWriteMaskMV("_StencilWriteMaskMV", Int) = 32 // StencilUsage.ObjectMotionVector
-
-        [KeywordEnum(Standard, Lite, Lazarov)] HDRP("HDRP", Int) = 0
 
         // Blending state
         _SurfaceType("__surfacetype", Float) = 0.0
@@ -223,13 +225,19 @@ Shader "HDRP/Lit"
     HLSLINCLUDE
 
     #pragma target 4.5
-    //#pragma enable_d3d11_debug_symbols
+    #pragma enable_d3d11_debug_symbols
+
+    #include "Packages/com.unity.render-pipelines.high-definition-config/Runtime/ShaderConfig.cs.hlsl"
+
+    #define LIT_SSS_SHADER 1
+    #define HDRP_LITE 1
 
     //-------------------------------------------------------------------------------------
     // Variant
     //-------------------------------------------------------------------------------------
 
-    #pragma multi_compile HDRP_STANDARD HDRP_LITE HDRP_LAZAROV
+    #pragma multi_compile _ _CURVATUREMAP
+    #pragma multi_compile _ALGORITHM_ANALYTIC _ALGORITHM_FIT
 
     #pragma shader_feature_local _ALPHATEST_ON
     #pragma shader_feature_local_fragment _DEPTHOFFSET_ON
@@ -331,7 +339,7 @@ Shader "HDRP/Lit"
     #define SUPPORT_BLENDMODE_PRESERVE_SPECULAR_LIGHTING
 
     // If we use subsurface scattering, enable output split lighting (for forward pass)
-    #if defined(_MATERIAL_FEATURE_SUBSURFACE_SCATTERING) && !defined(_SURFACE_TYPE_TRANSPARENT)
+    #if defined(_MATERIAL_FEATURE_SUBSURFACE_SCATTERING) && !defined(_SURFACE_TYPE_TRANSPARENT) && (HDRP_LITE == 0)
     #define OUTPUT_SPLIT_LIGHTING
     #endif
 
@@ -898,12 +906,12 @@ Shader "HDRP/Lit"
             #define HAS_LIGHTLOOP
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/LightLoop/LightLoopDef.hlsl"
-            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/Lit.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/LitSSS.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/LightLoop/LightLoop.hlsl"
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/ShaderPass/LitSharePass.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/LitData.hlsl"
-            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassForward.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassForwardSSS.hlsl"
 
             #pragma vertex Vert
             #pragma fragment Frag

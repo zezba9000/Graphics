@@ -26,9 +26,10 @@
 #define DEBUGVIEW_FABRIC_SURFACEDATA_SPECULAR_TINT (1309)
 #define DEBUGVIEW_FABRIC_SURFACEDATA_DIFFUSION_PROFILE_HASH (1310)
 #define DEBUGVIEW_FABRIC_SURFACEDATA_SUBSURFACE_MASK (1311)
-#define DEBUGVIEW_FABRIC_SURFACEDATA_THICKNESS (1312)
-#define DEBUGVIEW_FABRIC_SURFACEDATA_TANGENT (1313)
-#define DEBUGVIEW_FABRIC_SURFACEDATA_ANISOTROPY (1314)
+#define DEBUGVIEW_FABRIC_SURFACEDATA_CURVATURE (1312)
+#define DEBUGVIEW_FABRIC_SURFACEDATA_THICKNESS (1313)
+#define DEBUGVIEW_FABRIC_SURFACEDATA_TANGENT (1314)
+#define DEBUGVIEW_FABRIC_SURFACEDATA_ANISOTROPY (1315)
 
 //
 // UnityEngine.Rendering.HighDefinition.Fabric+BSDFData:  static fields
@@ -45,14 +46,18 @@
 #define DEBUGVIEW_FABRIC_BSDFDATA_PERCEPTUAL_ROUGHNESS (1359)
 #define DEBUGVIEW_FABRIC_BSDFDATA_DIFFUSION_PROFILE_INDEX (1360)
 #define DEBUGVIEW_FABRIC_BSDFDATA_SUBSURFACE_MASK (1361)
-#define DEBUGVIEW_FABRIC_BSDFDATA_THICKNESS (1362)
-#define DEBUGVIEW_FABRIC_BSDFDATA_USE_THICK_OBJECT_MODE (1363)
-#define DEBUGVIEW_FABRIC_BSDFDATA_TRANSMITTANCE (1364)
-#define DEBUGVIEW_FABRIC_BSDFDATA_TANGENT_WS (1365)
-#define DEBUGVIEW_FABRIC_BSDFDATA_BITANGENT_WS (1366)
-#define DEBUGVIEW_FABRIC_BSDFDATA_ROUGHNESS_T (1367)
-#define DEBUGVIEW_FABRIC_BSDFDATA_ROUGHNESS_B (1368)
-#define DEBUGVIEW_FABRIC_BSDFDATA_ANISOTROPY (1369)
+#define DEBUGVIEW_FABRIC_BSDFDATA_SHAPE_PARAM (1362)
+#define DEBUGVIEW_FABRIC_BSDFDATA_WORLD_SCALE (1363)
+#define DEBUGVIEW_FABRIC_BSDFDATA_FILTER_RADIUS (1364)
+#define DEBUGVIEW_FABRIC_BSDFDATA_CURVATURE (1365)
+#define DEBUGVIEW_FABRIC_BSDFDATA_THICKNESS (1366)
+#define DEBUGVIEW_FABRIC_BSDFDATA_USE_THICK_OBJECT_MODE (1367)
+#define DEBUGVIEW_FABRIC_BSDFDATA_TRANSMITTANCE (1368)
+#define DEBUGVIEW_FABRIC_BSDFDATA_TANGENT_WS (1369)
+#define DEBUGVIEW_FABRIC_BSDFDATA_BITANGENT_WS (1370)
+#define DEBUGVIEW_FABRIC_BSDFDATA_ROUGHNESS_T (1371)
+#define DEBUGVIEW_FABRIC_BSDFDATA_ROUGHNESS_B (1372)
+#define DEBUGVIEW_FABRIC_BSDFDATA_ANISOTROPY (1373)
 
 // Generated from UnityEngine.Rendering.HighDefinition.Fabric+SurfaceData
 // PackingRules = Exact
@@ -68,6 +73,7 @@ struct SurfaceData
     float3 specularColor;
     uint diffusionProfileHash;
     float subsurfaceMask;
+    float curvature;
     float thickness;
     float3 tangentWS;
     float anisotropy;
@@ -87,6 +93,10 @@ struct BSDFData
     float perceptualRoughness;
     uint diffusionProfileIndex;
     float subsurfaceMask;
+    float3 shapeParam;
+    float worldScale;
+    float filterRadius;
+    float curvature;
     float thickness;
     bool useThickObjectMode;
     float3 transmittance;
@@ -141,6 +151,9 @@ void GetGeneratedSurfaceDataDebug(uint paramId, SurfaceData surfacedata, inout f
             break;
         case DEBUGVIEW_FABRIC_SURFACEDATA_SUBSURFACE_MASK:
             result = surfacedata.subsurfaceMask.xxx;
+            break;
+        case DEBUGVIEW_FABRIC_SURFACEDATA_CURVATURE:
+            result = surfacedata.curvature.xxx;
             break;
         case DEBUGVIEW_FABRIC_SURFACEDATA_THICKNESS:
             result = surfacedata.thickness.xxx;
@@ -197,6 +210,18 @@ void GetGeneratedBSDFDataDebug(uint paramId, BSDFData bsdfdata, inout float3 res
             break;
         case DEBUGVIEW_FABRIC_BSDFDATA_SUBSURFACE_MASK:
             result = bsdfdata.subsurfaceMask.xxx;
+            break;
+        case DEBUGVIEW_FABRIC_BSDFDATA_SHAPE_PARAM:
+            result = bsdfdata.shapeParam;
+            break;
+        case DEBUGVIEW_FABRIC_BSDFDATA_WORLD_SCALE:
+            result = bsdfdata.worldScale.xxx;
+            break;
+        case DEBUGVIEW_FABRIC_BSDFDATA_FILTER_RADIUS:
+            result = bsdfdata.filterRadius.xxx;
+            break;
+        case DEBUGVIEW_FABRIC_BSDFDATA_CURVATURE:
+            result = bsdfdata.curvature.xxx;
             break;
         case DEBUGVIEW_FABRIC_BSDFDATA_THICKNESS:
             result = bsdfdata.thickness.xxx;

@@ -271,6 +271,18 @@ float ADD_IDX(GetSurfaceData)(FragInputs input, LayerTexCoord layerTexCoord, out
     surfaceData.thickness = ADD_IDX(_Thickness);
 #endif
 
+#ifdef HDRP_LITE
+    #ifdef _CURVATUREMAP
+    surfaceData.curvature = SAMPLE_UVMAPPING_TEXTURE2D(_CurvatureMap, sampler_CurvatureMap, ADD_IDX(layerTexCoord.base)).r;
+    surfaceData.curvature = rcp(abs(surfaceData.curvature * 2 - 1));
+    #else
+    surfaceData.curvature = MILLIMETERS_PER_METER * length(fwidth(input.positionRWS)) / length(fwidth(input.tangentToWorld[2]));
+    #endif
+#else
+    // TODO: this parameter should not be defined when HDRP_LITE is undef
+    surfaceData.curvature = 0;
+#endif
+
 
     // This part of the code is not used in case of layered shader but we keep the same macro system for simplicity
 #if !defined(LAYERED_LIT_SHADER)

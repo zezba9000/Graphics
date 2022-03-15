@@ -10,20 +10,39 @@
 bool ShouldEvaluateThickObjectTransmission(float3 V, float3 L, PreLightData preLightData,
                                            BSDFData bsdfData, int shadowIndex)
 {
-#ifdef MATERIAL_INCLUDE_TRANSMISSION
-    // Currently, we don't consider (NdotV < 0) as transmission.
-    // TODO: ignore normal map? What about double sided-surfaces with one-sided normals?
-    float NdotL = dot(bsdfData.normalWS, L);
-
-    // If a material does not support transmission, it will never have this flag, and
-    // the optimization pass of the compiler will remove all of the associated code.
-    // However, this will take a lot more CPU time than doing the same thing using
-    // the preprocessor.
-    return HasFlag(bsdfData.materialFeatures, MATERIALFEATUREFLAGS_TRANSMISSION_MODE_THICK_OBJECT) &&
-           (shadowIndex >= 0.0) && (NdotL < 0.0);
-#else
     return false;
+}
 #endif
+
+#if 0
+SHADOW_TYPE SharpenShadowForPreIntegratedSSS(SHADOW_TYPE shadow, float sharpening)
+{
+    // We use smoothstep as an approximation of the shadow falloff
+    float falloff = InverseSmoothstep01(shadow.r);
+    falloff = saturate(falloff * sharpening);
+    return Smoothstep01(falloff);
+}
+
+float3 IntegrateShadowScattering(DirectionalLightData light, SHADOW_TYPE shadow, float penumbraWidth, float3 shapeParam, int steps, int limit = 256)
+{
+	float inc = 2.0f * limit / (float)steps;
+
+    float shadowRemapped = InverseSmoothstep01(shadow.r);
+    shadowRemapped = saturate(shadowRemapped * _Area);
+
+	float3 totalWeights = 0.0f;
+	float3 totalLight = 0.0f;
+	for (float i = -limit; i <= limit; i += inc)
+	{
+        float x = (i / limit) * penumbraWidth;
+        SHADOW_TYPE falloff = Smoothstep01(saturate(shadowRemapped + x));
+        float3 color = ComputeShadowColor(falloff, light.shadowTint, light.penumbraTint);
+		float3 weights = EvalBurleyDiffusionProfile(abs(x), shapeParam);
+
+		totalWeights += weights;
+		totalLight += color * weights;
+	}
+	return saturate(totalLight / totalWeights);
 }
 #endif
 
@@ -95,7 +114,19 @@ DirectLighting ShadeSurface_Directional(LightLoopContext lightLoopContext,
             SHADOW_TYPE shadow = EvaluateShadow_Directional(lightLoopContext, posInput, light, builtinData, GetNormalForShadowBias(bsdfData));
             float NdotL  = dot(bsdfData.normalWS, L); // No microshadowing when facing away from light (use for thin transmission as well)
             shadow *= NdotL >= 0.0 ? ComputeMicroShadowing(GetAmbientOcclusionForMicroShadowing(bsdfData), NdotL, _MicroShadowOpacity) : 1.0;
+
+#if 0
+            if (HasFlag(bsdfData.materialFeatures, MATERIALFEATUREFLAGS_LIT_SUBSURFACE_SCATTERING) && _EnableSubsurfaceScattering)
+            {
+                shadow = SharpenShadowForPreIntegratedSSS(shadow, _Area);
+                float3 shadowColor = ComputeShadowColor(shadow, light.shadowTint, light.penumbraTint);
+                shadowColor *= ComputeShadowColor(shadow, 1.0f / bsdfData.shapeParam, 1);
+                shadowColor = IntegrateShadowScattering(light, shadow, _Blur, bsdfData.shapeParam, 20);
+                lightColor.rgb = shadowColor;
+            }
+#else
             lightColor.rgb *= ComputeShadowColor(shadow, light.shadowTint, light.penumbraTint);
+#endif
 
 #ifdef LIGHT_EVALUATION_SPLINE_SHADOW_VISIBILITY_SAMPLE
             if ((light.shadowIndex >= 0))

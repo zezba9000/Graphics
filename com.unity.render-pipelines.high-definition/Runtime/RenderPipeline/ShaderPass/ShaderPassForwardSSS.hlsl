@@ -161,6 +161,11 @@ void Frag(PackedVaryingsToPS packedInput
 
             GetPBRValidatorDebug(surfaceData, result);
 
+            if (_DebugFullScreenMode == FULLSCREENDEBUGMODE_VALIDATE_SPECULAR_COLOR)
+                bsdfData.curvature = 1.0f / (length(fwidth(surfaceData.geomNormalWS)) / length(fwidth(posInput.positionWS)) * _CurvatureScale);
+
+            result = 1.0f / bsdfData.curvature;
+
             outColor = float4(result, 1.0f);
         }
         else if (_DebugFullScreenMode == FULLSCREENDEBUGMODE_TRANSPARENCY_OVERDRAW)

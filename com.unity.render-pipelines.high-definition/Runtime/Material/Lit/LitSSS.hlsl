@@ -17,7 +17,9 @@
 //-----------------------------------------------------------------------------
 
 // Choose between Lambert diffuse and Disney diffuse (enable only one of them)
-// #define USE_DIFFUSE_LAMBERT_BRDF
+#ifdef HDRP_LITE
+#define USE_DIFFUSE_LAMBERT_BRDF
+#endif
 
 #define LIT_USE_GGX_ENERGY_COMPENSATION
 
@@ -411,6 +413,7 @@ BSDFData ConvertSurfaceDataToBSDFData(uint2 positionSS, SurfaceData surfaceData)
     // The UI is in charge of setuping the constrain, not the code. So if users is forward only and want unleash power, it is easy to unleash by some UI change
 
     bsdfData.diffusionProfileIndex = FindDiffusionProfileIndex(surfaceData.diffusionProfileHash);
+    bsdfData.curvature = surfaceData.curvature * _CurvatureScale;
 
     if (HasFlag(surfaceData.materialFeatures, MATERIALFEATUREFLAGS_LIT_SUBSURFACE_SCATTERING))
     {
@@ -1306,7 +1309,11 @@ bool IsNonZeroBSDF(float3 V, float3 L, PreLightData preLightData, BSDFData bsdfD
 {
     float NdotL = dot(bsdfData.normalWS, L);
 
+#ifdef HDRP_LITE
+    return HasFlag(bsdfData.materialFeatures, MATERIALFEATUREFLAGS_LIT_SUBSURFACE_SCATTERING) || (NdotL > 0.0);
+#else
     return HasFlag(bsdfData.materialFeatures, MATERIALFEATUREFLAGS_LIT_TRANSMISSION) || (NdotL > 0.0);
+#endif
 }
 
 CBSDF EvaluateBSDF(float3 V, float3 L, PreLightData preLightData, BSDFData bsdfData)
@@ -1404,8 +1411,36 @@ CBSDF EvaluateBSDF(float3 V, float3 L, PreLightData preLightData, BSDFData bsdfD
         diffTerm *= lerp(1, 1.0 - coatF, bsdfData.coatMask);
     }
 
+#if defined(HDRP_LITE) && SHADERPASS == SHADERPASS_FORWARD
+    float3 diffRNdotL = clampedNdotL;
+
+    if (HasFlag(bsdfData.materialFeatures, MATERIALFEATUREFLAGS_LIT_SUBSURFACE_SCATTERING) && _EnableSubsurfaceScattering)
+    {
+        float3 N_high = bsdfData.normalWS;
+        float3 N_low = bsdfData.geomNormalWS;
+
+        float worldScale = bsdfData.worldScale * rcp(bsdfData.subsurfaceMask);
+        float3 blur = saturate(EvalBurleyDiffusionProfile(worldScale, bsdfData.shapeParam) * bsdfData.filterRadius);
+        float3 NdotL_2 = float3(
+            dot(L, lerp(N_high, N_low, blur.r)),
+            dot(L, lerp(N_high, N_low, blur.g)),
+            dot(L, lerp(N_high, N_low, blur.b))
+        );
+
+        float radius = min(worldScale * bsdfData.curvature, HALF_MAX);
+
+    #if _ALGORITHM_ANALYTIC
+        diffRNdotL = IntegrateDiffuseScattering(NdotL_2, radius, bsdfData.shapeParam, 32);
+    #else
+        diffRNdotL = IntegrateDiffuseScattering(NdotL_2, radius, bsdfData.shapeParam);
+    #endif
+    }
+#else
+    float diffRNdotL = clampedNdotL;
+#endif
+
     // The compiler should optimize these. Can revisit later if necessary.
-    cbsdf.diffR = diffTerm * clampedNdotL;
+    cbsdf.diffR = diffTerm * diffRNdotL;
     cbsdf.diffT = diffTerm * flippedNdotL;
 
     // Probably worth branching here for perf reasons.
@@ -1425,7 +1460,7 @@ CBSDF EvaluateBSDF(float3 V, float3 L, PreLightData preLightData, BSDFData bsdfD
 
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/LightEvaluation.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/MaterialEvaluation.hlsl"
-#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/SurfaceShading.hlsl"
+#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/SurfaceShadingSSS.hlsl"
 
 //-----------------------------------------------------------------------------
 // EvaluateBSDF_Directional

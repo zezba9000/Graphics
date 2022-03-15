@@ -153,6 +153,8 @@ namespace UnityEditor.Rendering.HighDefinition
 
         // Properties common to Unlit and Lit
         MaterialProperty surfaceType = null;
+        MaterialProperty algo = null;
+        MaterialProperty hdrp = null;
 
         MaterialProperty alphaCutoffEnable = null;
         MaterialProperty useShadowThreshold = null;
@@ -283,6 +285,8 @@ namespace UnityEditor.Rendering.HighDefinition
         public override void LoadMaterialProperties()
         {
             surfaceType = FindProperty(kSurfaceType);
+            algo = FindProperty("_Algorithm");
+            hdrp = FindProperty("HDRP");
             useShadowThreshold = FindProperty(kUseShadowThreshold);
             alphaCutoffEnable = FindProperty(kAlphaCutoffEnabled);
             alphaCutoff = FindProperty(kAlphaCutoff);
@@ -371,6 +375,12 @@ namespace UnityEditor.Rendering.HighDefinition
         /// </summary>
         protected override void OnGUIOpen()
         {
+            if (hdrp != null)
+                materialEditor.ShaderProperty(hdrp, "HDRP");
+
+            if (algo != null)
+                materialEditor.ShaderProperty(algo, "Algorithm");
+
             if ((m_Features & Features.Surface) != 0)
                 DrawSurfaceGUI();
 
