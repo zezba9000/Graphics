@@ -218,10 +218,19 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
-        public class DoFPassData
+        public class DoFGaussianPassData
         {
             public TextureHandle cocTexture;
             public TextureHandle colorTexture;
+            public TextureHandle sourceTexture;
+            public RenderingData renderingData;
+            public Material material;
+        }
+
+        public class DoFBokehPassData
+        {
+            public TextureHandle cocTexture;
+            public TextureHandle dofTexture;
             public TextureHandle sourceTexture;
             public RenderingData renderingData;
             public Material material;
@@ -280,6 +289,7 @@ namespace UnityEngine.Rendering.Universal
                     material.SetVector(ShaderConstants._CoCParams, new Vector3(farStart, farEnd, maxRadius));
 
                     // Temporary textures
+                    // TODO RENDERGRAPH: FilterMode.Bilinear
                     var fullCoCTextureDesc = PostProcessPass.GetCompatibleDescriptor(cameraTargetDescriptor, cameraTargetDescriptor.width, cameraTargetDescriptor.height, m_GaussianCoCFormat);
                     var fullCoCTexture = UniversalRenderer.CreateRenderGraphTexture(graph, fullCoCTextureDesc, "_FullCoCTexture", true);
                     var halfCoCTextureDesc = PostProcessPass.GetCompatibleDescriptor(cameraTargetDescriptor, wh, hh, m_GaussianCoCFormat);
@@ -291,9 +301,10 @@ namespace UnityEngine.Rendering.Universal
 
                     // TODO RENDERGRAPH: this line is for postFX dynamic resolution without RTHandle, we should consider remove this line in favor of RTHandles
                     PostProcessUtils.SetSourceSize(cmd, cameraTargetDescriptor);
+                    // TODO RENDERGRAPH: should not call cmd here, move it into render graph renderfunc
                     cmd.SetGlobalVector(ShaderConstants._DownSampleScaleFactor, new Vector4(1.0f / downSample, 1.0f / downSample, downSample, downSample));
 
-                    using (var builder = graph.AddRenderPass<DoFPassData>("Depth of Field - Compute CoC", out var passData, ProfilingSampler.Get(markerName)))
+                    using (var builder = graph.AddRenderPass<DoFGaussianPassData>("Depth of Field - Compute CoC", out var passData, ProfilingSampler.Get(markerName)))
                     {
                         builder.UseColorBuffer(fullCoCTexture, 0);
                         passData.sourceTexture = builder.ReadTexture(source);
@@ -303,7 +314,7 @@ namespace UnityEngine.Rendering.Universal
                         //  TODO RENDERGRAPH: culling? force culluing off for testing
                         builder.AllowPassCulling(false);
 
-                        builder.SetRenderFunc((DoFPassData data, RenderGraphContext context) =>
+                        builder.SetRenderFunc((DoFGaussianPassData data, RenderGraphContext context) =>
                         {
                             var material = data.material;
                             var cmd = data.renderingData.commandBuffer;
@@ -314,7 +325,7 @@ namespace UnityEngine.Rendering.Universal
                         });
                     }
 
-                    using (var builder = graph.AddRenderPass<DoFPassData>("Depth of Field - Downscale & Prefilter Color + CoC", out var passData, ProfilingSampler.Get(markerName)))
+                    using (var builder = graph.AddRenderPass<DoFGaussianPassData>("Depth of Field - Downscale & Prefilter Color + CoC", out var passData, ProfilingSampler.Get(markerName)))
                     {
                         builder.UseColorBuffer(halfCoCTexture, 0);
                         builder.UseColorBuffer(pingTexture, 1);
@@ -330,7 +341,7 @@ namespace UnityEngine.Rendering.Universal
                         //  TODO RENDERGRAPH: culling? force culluing off for testing
                         builder.AllowPassCulling(false);
 
-                        builder.SetRenderFunc((DoFPassData data, RenderGraphContext context) =>
+                        builder.SetRenderFunc((DoFGaussianPassData data, RenderGraphContext context) =>
                         {
                             var material = data.material;
                             var cmd = data.renderingData.commandBuffer;
@@ -347,8 +358,7 @@ namespace UnityEngine.Rendering.Universal
                         });
                     }
 
-
-                    using (var builder = graph.AddRenderPass<DoFPassData>("Depth of Field - Blur H", out var passData, ProfilingSampler.Get(markerName)))
+                    using (var builder = graph.AddRenderPass<DoFGaussianPassData>("Depth of Field - Blur H", out var passData, ProfilingSampler.Get(markerName)))
                     {
                         builder.UseColorBuffer(pongTexture, 0);
                         passData.sourceTexture = builder.ReadTexture(pingTexture);
@@ -360,19 +370,19 @@ namespace UnityEngine.Rendering.Universal
                         //  TODO RENDERGRAPH: culling? force culluing off for testing
                         builder.AllowPassCulling(false);
 
-                        builder.SetRenderFunc((DoFPassData data, RenderGraphContext context) =>
+                        builder.SetRenderFunc((DoFGaussianPassData data, RenderGraphContext context) =>
                         {
                             var material = data.material;
                             var cmd = data.renderingData.commandBuffer;
 
-                            // Downscale & prefilter color + coc
+                            // Blur
                             cmd.SetGlobalTexture(ShaderConstants._HalfCoCTexture, data.cocTexture);
                             cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, data.sourceTexture);
                             DrawFullscreenMesh(cmd, material, 2, data.renderingData.cameraData.xr.enabled);
                         });
                     }
 
-                    using (var builder = graph.AddRenderPass<DoFPassData>("Depth of Field - Blur V", out var passData, ProfilingSampler.Get(markerName)))
+                    using (var builder = graph.AddRenderPass<DoFGaussianPassData>("Depth of Field - Blur V", out var passData, ProfilingSampler.Get(markerName)))
                     {
                         builder.UseColorBuffer(pingTexture, 0);
                         passData.sourceTexture = builder.ReadTexture(pongTexture);
@@ -384,19 +394,19 @@ namespace UnityEngine.Rendering.Universal
                         //  TODO RENDERGRAPH: culling? force culluing off for testing
                         builder.AllowPassCulling(false);
 
-                        builder.SetRenderFunc((DoFPassData data, RenderGraphContext context) =>
+                        builder.SetRenderFunc((DoFGaussianPassData data, RenderGraphContext context) =>
                         {
                             var material = data.material;
                             var cmd = data.renderingData.commandBuffer;
 
-                            // Downscale & prefilter color + coc
+                            // Blur
                             cmd.SetGlobalTexture(ShaderConstants._HalfCoCTexture, data.cocTexture);
                             cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, data.sourceTexture);
                             DrawFullscreenMesh(cmd, material, 3, data.renderingData.cameraData.xr.enabled);
                         });
                     }
 
-                    using (var builder = graph.AddRenderPass<DoFPassData>("Depth of Field - Composite", out var passData, ProfilingSampler.Get(markerName)))
+                    using (var builder = graph.AddRenderPass<DoFGaussianPassData>("Depth of Field - Composite", out var passData, ProfilingSampler.Get(markerName)))
                     {
                         builder.UseColorBuffer(destination, 0);
                         passData.sourceTexture = builder.ReadTexture(source);
@@ -409,12 +419,12 @@ namespace UnityEngine.Rendering.Universal
                         //  TODO RENDERGRAPH: culling? force culluing off for testing
                         builder.AllowPassCulling(false);
 
-                        builder.SetRenderFunc((DoFPassData data, RenderGraphContext context) =>
+                        builder.SetRenderFunc((DoFGaussianPassData data, RenderGraphContext context) =>
                         {
                             var material = data.material;
                             var cmd = data.renderingData.commandBuffer;
 
-                            // Downscale & prefilter color + coc
+                            // Composite
                             cmd.SetGlobalTexture(ShaderConstants._ColorTexture, data.colorTexture);
                             cmd.SetGlobalTexture(ShaderConstants._FullCoCTexture, data.cocTexture);
                             cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, data.sourceTexture);
@@ -425,6 +435,161 @@ namespace UnityEngine.Rendering.Universal
                 else if (m_DepthOfField.mode.value == DepthOfFieldMode.Bokeh)
                 {
                     // DoBokehDepthOfField(cmd, source, destination, pixelRect);
+                    int downSample = 2;
+                    var material = dofMaterial;
+                    int wh = cameraTargetDescriptor.width / downSample;
+                    int hh = cameraTargetDescriptor.height / downSample;
+
+                    // "A Lens and Aperture Camera Model for Synthetic Image Generation" [Potmesil81]
+                    float F = m_DepthOfField.focalLength.value / 1000f;
+                    float A = m_DepthOfField.focalLength.value / m_DepthOfField.aperture.value;
+                    float P = m_DepthOfField.focusDistance.value;
+                    float maxCoC = (A * F) / (P - F);
+                    float maxRadius = GetMaxBokehRadiusInPixels(cameraTargetDescriptor.height);
+                    float rcpAspect = 1f / (wh / (float)hh);
+
+                    CoreUtils.SetKeyword(material, ShaderKeywordStrings.UseFastSRGBLinearConversion, m_UseFastSRGBLinearConversion);
+                    // TODO RENDERGRAPH: should not call cmd here, move it into render graph renderfunc
+                    cmd.SetGlobalVector(ShaderConstants._CoCParams, new Vector4(P, maxCoC, maxRadius, rcpAspect));
+
+                    // Prepare the bokeh kernel constant buffer
+                    int hash = m_DepthOfField.GetHashCode();
+                    if (hash != m_BokehHash || maxRadius != m_BokehMaxRadius || rcpAspect != m_BokehRCPAspect)
+                    {
+                        m_BokehHash = hash;
+                        m_BokehMaxRadius = maxRadius;
+                        m_BokehRCPAspect = rcpAspect;
+                        PrepareBokehKernel(maxRadius, rcpAspect);
+                    }
+
+                    // TODO RENDERGRAPH: should not call cmd here, move it into render graph renderfunc
+                    cmd.SetGlobalVectorArray(ShaderConstants._BokehKernel, m_BokehKernel);
+
+                    // Temporary textures
+                    // TODO RENDERGRAPH: FilterMode.Bilinear
+                    var fullCoCTextureDesc = PostProcessPass.GetCompatibleDescriptor(cameraTargetDescriptor, cameraTargetDescriptor.width, cameraTargetDescriptor.height, GraphicsFormat.R8_UNorm);
+                    var fullCoCTexture = UniversalRenderer.CreateRenderGraphTexture(graph, fullCoCTextureDesc, "_FullCoCTexture", true);
+                    var pingTextureDesc = PostProcessPass.GetCompatibleDescriptor(cameraTargetDescriptor, wh, hh, GraphicsFormat.R16G16B16A16_SFloat);
+                    var pingTexture = UniversalRenderer.CreateRenderGraphTexture(graph, pingTextureDesc, "_PingTexture", true);
+                    var pongTextureDesc = PostProcessPass.GetCompatibleDescriptor(cameraTargetDescriptor, wh, hh, GraphicsFormat.R16G16B16A16_SFloat);
+                    var pongTexture = UniversalRenderer.CreateRenderGraphTexture(graph, pongTextureDesc, "_PongTexture", true);
+
+                    // TODO RENDERGRAPH: should not call cmd here, move it into render graph renderfunc
+                    PostProcessUtils.SetSourceSize(cmd, m_Descriptor);
+                    cmd.SetGlobalVector(ShaderConstants._DownSampleScaleFactor, new Vector4(1.0f / downSample, 1.0f / downSample, downSample, downSample));
+                    float uvMargin = (1.0f / m_Descriptor.height) * downSample;
+                    cmd.SetGlobalVector(ShaderConstants._BokehConstants, new Vector4(uvMargin, uvMargin * 2.0f));
+
+                    using (var builder = graph.AddRenderPass<DoFBokehPassData>("Depth of Field - Compute CoC", out var passData, ProfilingSampler.Get(markerName)))
+                    {
+                        builder.UseColorBuffer(fullCoCTexture, 0);
+                        passData.sourceTexture = builder.ReadTexture(source);
+                        passData.renderingData = renderingData;
+                        passData.material = material;
+
+                        //  TODO RENDERGRAPH: culling? force culluing off for testing
+                        builder.AllowPassCulling(false);
+
+                        builder.SetRenderFunc((DoFBokehPassData data, RenderGraphContext context) =>
+                        {
+                            var material = data.material;
+                            var cmd = data.renderingData.commandBuffer;
+
+                            // Compute CoC
+                            cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, data.sourceTexture);
+                            DrawFullscreenMesh(cmd, material, 0, data.renderingData.cameraData.xr.enabled);
+                        });
+                    }
+
+                    using (var builder = graph.AddRenderPass<DoFBokehPassData>("Depth of Field - Downscale & Prefilter Color + CoC", out var passData, ProfilingSampler.Get(markerName)))
+                    {
+                        builder.UseColorBuffer(pingTexture, 0);
+                        passData.sourceTexture = builder.ReadTexture(source);
+                        passData.cocTexture = builder.ReadTexture(fullCoCTexture);
+                        passData.renderingData = renderingData;
+                        passData.material = material;
+
+                        //  TODO RENDERGRAPH: culling? force culluing off for testing
+                        builder.AllowPassCulling(false);
+
+                        builder.SetRenderFunc((DoFBokehPassData data, RenderGraphContext context) =>
+                        {
+                            var material = data.material;
+                            var cmd = data.renderingData.commandBuffer;
+
+                            // Downscale & prefilter color + coc
+                            cmd.SetGlobalTexture(ShaderConstants._FullCoCTexture, data.cocTexture);
+                            DrawFullscreenMesh(cmd, material, 1, data.renderingData.cameraData.xr.enabled);
+                        });
+                    }
+
+                    using (var builder = graph.AddRenderPass<DoFBokehPassData>("Depth of Field - Bokeh Blur", out var passData, ProfilingSampler.Get(markerName)))
+                    {
+                        builder.UseColorBuffer(pongTexture, 0);
+                        passData.sourceTexture = builder.ReadTexture(pingTexture);
+                        passData.renderingData = renderingData;
+                        passData.material = material;
+
+                        //  TODO RENDERGRAPH: culling? force culluing off for testing
+                        builder.AllowPassCulling(false);
+
+                        builder.SetRenderFunc((DoFBokehPassData data, RenderGraphContext context) =>
+                        {
+                            var material = data.material;
+                            var cmd = data.renderingData.commandBuffer;
+
+                            // Downscale & prefilter color + coc
+                            cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, data.sourceTexture);
+                            DrawFullscreenMesh(cmd, material, 2, data.renderingData.cameraData.xr.enabled);
+                        });
+                    }
+
+                    using (var builder = graph.AddRenderPass<DoFBokehPassData>("Depth of Field - Post-filtering", out var passData, ProfilingSampler.Get(markerName)))
+                    {
+                        builder.UseColorBuffer(pingTexture, 0);
+                        passData.sourceTexture = builder.ReadTexture(pongTexture);
+                        passData.renderingData = renderingData;
+                        passData.material = material;
+
+                        //  TODO RENDERGRAPH: culling? force culluing off for testing
+                        builder.AllowPassCulling(false);
+
+                        builder.SetRenderFunc((DoFBokehPassData data, RenderGraphContext context) =>
+                        {
+                            var material = data.material;
+                            var cmd = data.renderingData.commandBuffer;
+
+                            // Post - filtering
+                            // TODO RENDERGRAPH: Look into loadstore op in BlitDstDiscardContent
+                            cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, data.sourceTexture);
+                            DrawFullscreenMesh(cmd, material, 3, data.renderingData.cameraData.xr.enabled);
+                        });
+                    }
+
+                    using (var builder = graph.AddRenderPass<DoFBokehPassData>("Depth of Field - Composite", out var passData, ProfilingSampler.Get(markerName)))
+                    {
+                        builder.UseColorBuffer(destination, 0);
+                        passData.sourceTexture = builder.ReadTexture(source);
+                        passData.dofTexture = builder.ReadTexture(pingTexture);
+
+                        passData.renderingData = renderingData;
+                        passData.material = material;
+
+                        //  TODO RENDERGRAPH: culling? force culluing off for testing
+                        builder.AllowPassCulling(false);
+
+                        builder.SetRenderFunc((DoFBokehPassData data, RenderGraphContext context) =>
+                        {
+                            var material = data.material;
+                            var cmd = data.renderingData.commandBuffer;
+
+                            // Composite
+                            // TODO RENDERGRAPH: Look into loadstore op in BlitDstDiscardContent
+                            cmd.SetGlobalTexture(ShaderConstants._DofTexture, data.dofTexture);
+                            cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, data.sourceTexture);
+                            DrawFullscreenMesh(cmd, material, 4, data.renderingData.cameraData.xr.enabled);
+                        });
+                    }
                 }
             }
         }
