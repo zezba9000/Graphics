@@ -9,9 +9,7 @@ namespace Unity.Testing.XR.Editor
 {
     public class InjectMockHMD
     {
-        // static readonly string packageToInject = "com.unity.xr.mock-hmd";
-        static readonly string[] packagesToInject = { "com.unity.xr.management@4.2.1", "com.unity.xr.mock-hmd" };
-
+        static readonly string packageToInject = "com.unity.xr.mock-hmd";
         static readonly string pathToSettings = "Packages/com.unity.testing.xr/XR/XRGeneralSettings.asset";
 
         [InitializeOnLoadMethod]
@@ -19,12 +17,10 @@ namespace Unity.Testing.XR.Editor
         {
             if (XRGraphicsAutomatedTests.enabled)
             {
-                foreach (var packageName in packagesToInject)
-                {
-                    var req = Client.Add(packageName);
-                    while (!req.IsCompleted)
-                        System.Threading.Thread.Yield();
-                }
+                var req = Client.Add(packageToInject);
+
+                while (!req.IsCompleted)
+                    System.Threading.Thread.Yield();
             }
         }
 
