@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using System;
 
 namespace UnityEngine.Rendering.Universal
 {
@@ -146,7 +147,7 @@ namespace UnityEngine.Rendering.Universal
                     builder.SetRenderFunc((SMAAPassData data, RenderGraphContext context) =>
                     {
                         var pixelRect = data.renderingData.cameraData.pixelRect;
-                        var material = data.material;
+                        var SMAAMaterial = data.material;
 
                         var cmd = data.renderingData.commandBuffer;
 
@@ -156,7 +157,7 @@ namespace UnityEngine.Rendering.Universal
                         // Pass 1: Edge detection
                         cmd.ClearRenderTarget(RTClearFlags.ColorStencil, Color.clear, 1.0f, 0);
                         cmd.SetGlobalTexture(ShaderConstants._ColorTexture, passData.sourceTexture);
-                        DrawFullscreenMesh(cmd, material, 0, data.renderingData.cameraData.xr.enabled);
+                        DrawFullscreenMesh(cmd, SMAAMaterial, 0, data.renderingData.cameraData.xr.enabled);
                     });
                 }
 
@@ -174,7 +175,7 @@ namespace UnityEngine.Rendering.Universal
                     builder.SetRenderFunc((SMAAPassData data, RenderGraphContext context) =>
                     {
                         var pixelRect = data.renderingData.cameraData.pixelRect;
-                        var material = data.material;
+                        var SMAAMaterial = data.material;
 
                         var cmd = data.renderingData.commandBuffer;
 
@@ -184,7 +185,7 @@ namespace UnityEngine.Rendering.Universal
                         // Pass 2: Blend weights
                         cmd.ClearRenderTarget(false, true, Color.clear);
                         cmd.SetGlobalTexture(ShaderConstants._ColorTexture, passData.sourceTexture);
-                        DrawFullscreenMesh(cmd, material, 1, data.renderingData.cameraData.xr.enabled);
+                        DrawFullscreenMesh(cmd, SMAAMaterial, 1, data.renderingData.cameraData.xr.enabled);
                     });
                 }
 
@@ -202,7 +203,7 @@ namespace UnityEngine.Rendering.Universal
                     builder.SetRenderFunc((SMAAPassData data, RenderGraphContext context) =>
                     {
                         var pixelRect = data.renderingData.cameraData.pixelRect;
-                        var material = data.material;
+                        var SMAAMaterial = data.material;
                         var cmd = data.renderingData.commandBuffer;
 
                         // Prepare for manual blit
@@ -212,10 +213,224 @@ namespace UnityEngine.Rendering.Universal
                         cmd.ClearRenderTarget(false, true, Color.clear);
                         cmd.SetGlobalTexture(ShaderConstants._ColorTexture, passData.sourceTexture);
                         cmd.SetGlobalTexture(ShaderConstants._BlendTexture, passData.blendTexture);
-                        DrawFullscreenMesh(cmd, material, 2, data.renderingData.cameraData.xr.enabled);
+                        DrawFullscreenMesh(cmd, SMAAMaterial, 2, data.renderingData.cameraData.xr.enabled);
                     });
                 }
             }
+        }
+
+        public void SetupBloomForUberMaterial(in TextureHandle bloomTexture, Material uberMaterial)
+        {
+            // Setup bloom on uber
+            var tint = m_Bloom.tint.value.linear;
+            var luma = ColorUtils.Luminance(tint);
+            tint = luma > 0f ? tint * (1f / luma) : Color.white;
+
+            var bloomParams = new Vector4(m_Bloom.intensity.value, tint.r, tint.g, tint.b);
+            uberMaterial.SetVector(ShaderConstants._Bloom_Params, bloomParams);
+            uberMaterial.SetFloat(ShaderConstants._Bloom_RGBM, m_UseRGBM ? 1f : 0f);
+
+            // TODO RENDERGRAPH: double check the logic here to ensure correctness. We prefer material.setTexture here, otherwise we will need another render graph pass here to add render command.
+            //cmd.SetGlobalTexture(ShaderConstants._Bloom_Texture, bloomTexture);
+            uberMaterial.SetTexture(ShaderConstants._Bloom_Texture, bloomTexture);
+
+            // Setup lens dirtiness on uber
+            // Keep the aspect ratio correct & center the dirt texture, we don't want it to be
+            // stretched or squashed
+            var dirtTexture = m_Bloom.dirtTexture.value == null ? Texture2D.blackTexture : m_Bloom.dirtTexture.value;
+            float dirtRatio = dirtTexture.width / (float)dirtTexture.height;
+            float screenRatio = m_Descriptor.width / (float)m_Descriptor.height;
+            var dirtScaleOffset = new Vector4(1f, 1f, 0f, 0f);
+            float dirtIntensity = m_Bloom.dirtIntensity.value;
+
+            if (dirtRatio > screenRatio)
+            {
+                dirtScaleOffset.x = screenRatio / dirtRatio;
+                dirtScaleOffset.z = (1f - dirtScaleOffset.x) * 0.5f;
+            }
+            else if (screenRatio > dirtRatio)
+            {
+                dirtScaleOffset.y = dirtRatio / screenRatio;
+                dirtScaleOffset.w = (1f - dirtScaleOffset.y) * 0.5f;
+            }
+
+            uberMaterial.SetVector(ShaderConstants._LensDirt_Params, dirtScaleOffset);
+            uberMaterial.SetFloat(ShaderConstants._LensDirt_Intensity, dirtIntensity);
+            uberMaterial.SetTexture(ShaderConstants._LensDirt_Texture, dirtTexture);
+
+            // Keyword setup - a bit convoluted as we're trying to save some variants in Uber...
+            if (m_Bloom.highQualityFiltering.value)
+                uberMaterial.EnableKeyword(dirtIntensity > 0f ? ShaderKeywordStrings.BloomHQDirt : ShaderKeywordStrings.BloomHQ);
+            else
+                uberMaterial.EnableKeyword(dirtIntensity > 0f ? ShaderKeywordStrings.BloomLQDirt : ShaderKeywordStrings.BloomLQ);
+        }
+
+        public class BloomPassData
+        {
+            public TextureHandle sourceTexture;
+            public TextureHandle sourceTextureLowMip;
+            public RenderingData renderingData;
+            public Material material;
+        }
+
+        public void RenderBloomTexture(in TextureHandle source, out TextureHandle destination, ref RenderingData renderingData)
+        {
+            var stack = VolumeManager.instance.stack;
+            m_Bloom = stack.GetComponent<Bloom>();
+
+            var cameraData = renderingData.cameraData;
+            var graph = renderingData.renderGraph;
+            // Start at half-res
+            int downres = 1;
+            switch (m_Bloom.downscale.value)
+            {
+                case BloomDownscaleMode.Half:
+                    downres = 1;
+                    break;
+                case BloomDownscaleMode.Quarter:
+                    downres = 2;
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
+
+            var cameraTargetDescriptor = renderingData.cameraData.cameraTargetDescriptor;
+            int tw = cameraTargetDescriptor.width >> downres;
+            int th = cameraTargetDescriptor.height >> downres;
+
+            // Determine the iteration count
+            int maxSize = Mathf.Max(tw, th);
+            int iterations = Mathf.FloorToInt(Mathf.Log(maxSize, 2f) - 1);
+            int mipCount = Mathf.Clamp(iterations, 1, m_Bloom.maxIterations.value);
+
+            // Pre-filtering parameters
+            float clamp = m_Bloom.clamp.value;
+            float threshold = Mathf.GammaToLinearSpace(m_Bloom.threshold.value);
+            float thresholdKnee = threshold * 0.5f; // Hardcoded soft knee
+
+            // Material setup
+            float scatter = Mathf.Lerp(0.05f, 0.95f, m_Bloom.scatter.value);
+            var bloomMaterial = m_Materials.bloom;
+            bloomMaterial.SetVector(ShaderConstants._Params, new Vector4(scatter, clamp, threshold, thresholdKnee));
+            CoreUtils.SetKeyword(bloomMaterial, ShaderKeywordStrings.BloomHQ, m_Bloom.highQualityFiltering.value);
+            CoreUtils.SetKeyword(bloomMaterial, ShaderKeywordStrings.UseRGBM, m_UseRGBM);
+
+            // Bloom pyramid TextureHandles
+            TextureHandle[] _BloomMipUp = new TextureHandle[k_MaxPyramidSize];
+            TextureHandle[] _BloomMipDown = new TextureHandle[k_MaxPyramidSize];
+
+            // Prefilter
+            var desc = GetCompatibleDescriptor(tw, th, m_DefaultHDRFormat);
+            _BloomMipDown[0] = UniversalRenderer.CreateRenderGraphTexture(graph, desc, "_BloomMipDown", true);
+            _BloomMipUp[0] = UniversalRenderer.CreateRenderGraphTexture(graph, desc, "_BloomMipUp", true);
+            using (var builder = graph.AddRenderPass<BloomPassData>("Bloom - Prefilter", out var passData, ProfilingSampler.Get(URPProfileId.Bloom)))
+            {
+                builder.UseColorBuffer(_BloomMipDown[0], 0);
+                passData.sourceTexture = builder.ReadTexture(source);
+                passData.renderingData = renderingData;
+                passData.material = bloomMaterial;
+
+                //  TODO RENDERGRAPH: culling? force culluing off for testing
+                builder.AllowPassCulling(false);
+
+                builder.SetRenderFunc((BloomPassData data, RenderGraphContext context) =>
+                {
+                    var material = data.material;
+                    var cmd = data.renderingData.commandBuffer;
+                    cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, data.sourceTexture);
+                    DrawFullscreenMesh(cmd, material, 0, data.renderingData.cameraData.xr.enabled);
+                });
+            }
+
+            // Downsample - gaussian pyramid
+            TextureHandle lastDown = _BloomMipDown[0];
+            for (int i = 1; i < mipCount; i++)
+            {
+                tw = Mathf.Max(1, tw >> 1);
+                th = Mathf.Max(1, th >> 1);
+                TextureHandle mipDown = _BloomMipDown[i];
+                TextureHandle mipUp = _BloomMipUp[i];
+
+                desc.width = tw;
+                desc.height = th;
+
+                mipDown = UniversalRenderer.CreateRenderGraphTexture(graph, desc, "_BloomMipDown", true);
+                mipUp = UniversalRenderer.CreateRenderGraphTexture(graph, desc, "_BloomMipUp", true);
+
+                // Classic two pass gaussian blur - use mipUp as a temporary target
+                //   First pass does 2x downsampling + 9-tap gaussian
+                //   Second pass does 9-tap gaussian using a 5-tap filter + bilinear filtering
+                using (var builder = graph.AddRenderPass<BloomPassData>("Bloom - First pass", out var passData, ProfilingSampler.Get(URPProfileId.Bloom)))
+                {
+                    builder.UseColorBuffer(mipUp, 0);
+                    passData.sourceTexture = builder.ReadTexture(lastDown);
+                    passData.renderingData = renderingData;
+                    passData.material = bloomMaterial;
+
+                    //  TODO RENDERGRAPH: culling? force culluing off for testing
+                    builder.AllowPassCulling(false);
+
+                    builder.SetRenderFunc((BloomPassData data, RenderGraphContext context) =>
+                    {
+                        var material = data.material;
+                        var cmd = data.renderingData.commandBuffer;
+                        cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, data.sourceTexture);
+                        DrawFullscreenMesh(cmd, material, 1, data.renderingData.cameraData.xr.enabled);
+                    });
+                }
+
+                using (var builder = graph.AddRenderPass<BloomPassData>("Bloom - Second pass", out var passData, ProfilingSampler.Get(URPProfileId.Bloom)))
+                {
+                    builder.UseColorBuffer(mipDown, 0);
+                    passData.sourceTexture = builder.ReadTexture(mipUp);
+                    passData.renderingData = renderingData;
+                    passData.material = bloomMaterial;
+
+                    //  TODO RENDERGRAPH: culling? force culluing off for testing
+                    builder.AllowPassCulling(false);
+
+                    builder.SetRenderFunc((BloomPassData data, RenderGraphContext context) =>
+                    {
+                        var material = data.material;
+                        var cmd = data.renderingData.commandBuffer;
+                        cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, data.sourceTexture);
+                        DrawFullscreenMesh(cmd, material, 2, data.renderingData.cameraData.xr.enabled);
+                    });
+                }
+
+                lastDown = mipDown;
+            }
+
+            // Upsample (bilinear by default, HQ filtering does bicubic instead
+            for (int i = mipCount - 2; i >= 0; i--)
+            {
+                TextureHandle lowMip = (i == mipCount - 2) ? _BloomMipDown[i + 1] : _BloomMipUp[i + 1];
+                TextureHandle highMip = _BloomMipDown[i];
+                TextureHandle dst = _BloomMipUp[i];
+
+                using (var builder = graph.AddRenderPass<BloomPassData>("Bloom - Second pass", out var passData, ProfilingSampler.Get(URPProfileId.Bloom)))
+                {
+                    builder.UseColorBuffer(dst, 0);
+                    passData.sourceTexture = builder.ReadTexture(highMip);
+                    passData.sourceTextureLowMip = builder.ReadTexture(lowMip);
+                    passData.renderingData = renderingData;
+                    passData.material = bloomMaterial;
+
+                    //  TODO RENDERGRAPH: culling? force culluing off for testing
+                    builder.AllowPassCulling(false);
+
+                    builder.SetRenderFunc((BloomPassData data, RenderGraphContext context) =>
+                    {
+                        var material = data.material;
+                        var cmd = data.renderingData.commandBuffer;
+                        cmd.SetGlobalTexture(ShaderConstants._SourceTexLowMip, data.sourceTextureLowMip);
+                        cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, data.sourceTexture);
+                        DrawFullscreenMesh(cmd, material, 3, data.renderingData.cameraData.xr.enabled);
+                    });
+                }
+            }
+
+            destination = _BloomMipUp[0];
         }
 
         public class DoFGaussianPassData
@@ -277,7 +492,8 @@ namespace UnityEngine.Rendering.Universal
                     int hh = cameraTargetDescriptor.height / downSample;
                     float farStart = m_DepthOfField.gaussianStart.value;
                     float farEnd = Mathf.Max(farStart, m_DepthOfField.gaussianEnd.value);
-                    var cmd = renderingData.commandBuffer;
+                    // TODO RENDERGRAPH: remove this line
+                    var tempcmd = renderingData.commandBuffer;
 
                     // Assumes a radius of 1 is 1 at 1080p
                     // Past a certain radius our gaussian kernel will look very bad so we'll clamp it for
@@ -300,9 +516,9 @@ namespace UnityEngine.Rendering.Universal
                     var pongTexture = UniversalRenderer.CreateRenderGraphTexture(graph, pongTextureDesc, "_PongTexture", true);
 
                     // TODO RENDERGRAPH: this line is for postFX dynamic resolution without RTHandle, we should consider remove this line in favor of RTHandles
-                    PostProcessUtils.SetSourceSize(cmd, cameraTargetDescriptor);
+                    PostProcessUtils.SetSourceSize(tempcmd, cameraTargetDescriptor);
                     // TODO RENDERGRAPH: should not call cmd here, move it into render graph renderfunc
-                    cmd.SetGlobalVector(ShaderConstants._DownSampleScaleFactor, new Vector4(1.0f / downSample, 1.0f / downSample, downSample, downSample));
+                    tempcmd.SetGlobalVector(ShaderConstants._DownSampleScaleFactor, new Vector4(1.0f / downSample, 1.0f / downSample, downSample, downSample));
 
                     using (var builder = graph.AddRenderPass<DoFGaussianPassData>("Depth of Field - Compute CoC", out var passData, ProfilingSampler.Get(markerName)))
                     {
@@ -316,12 +532,12 @@ namespace UnityEngine.Rendering.Universal
 
                         builder.SetRenderFunc((DoFGaussianPassData data, RenderGraphContext context) =>
                         {
-                            var material = data.material;
+                            var dofmaterial = data.material;
                             var cmd = data.renderingData.commandBuffer;
 
                             // Compute CoC
                             cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, data.sourceTexture);
-                            DrawFullscreenMesh(cmd, material, 0, data.renderingData.cameraData.xr.enabled);
+                            DrawFullscreenMesh(cmd, dofmaterial, 0, data.renderingData.cameraData.xr.enabled);
                         });
                     }
 
@@ -343,7 +559,7 @@ namespace UnityEngine.Rendering.Universal
 
                         builder.SetRenderFunc((DoFGaussianPassData data, RenderGraphContext context) =>
                         {
-                            var material = data.material;
+                            var dofmaterial = data.material;
                             var cmd = data.renderingData.commandBuffer;
                             var pixelRect = data.renderingData.cameraData.pixelRect;
 
@@ -353,7 +569,7 @@ namespace UnityEngine.Rendering.Universal
                             //cmd.SetViewport(pixelRect);
                             cmd.SetGlobalTexture(ShaderConstants._ColorTexture, data.sourceTexture);
                             cmd.SetGlobalTexture(ShaderConstants._FullCoCTexture, data.cocTexture);
-                            DrawFullscreenMesh(cmd, material, 1, data.renderingData.cameraData.xr.enabled);
+                            DrawFullscreenMesh(cmd, dofmaterial, 1, data.renderingData.cameraData.xr.enabled);
                             cmd.SetViewProjectionMatrices(data.renderingData.cameraData.camera.worldToCameraMatrix, data.renderingData.cameraData.camera.projectionMatrix);
                         });
                     }
@@ -372,13 +588,13 @@ namespace UnityEngine.Rendering.Universal
 
                         builder.SetRenderFunc((DoFGaussianPassData data, RenderGraphContext context) =>
                         {
-                            var material = data.material;
+                            var dofmaterial = data.material;
                             var cmd = data.renderingData.commandBuffer;
 
                             // Blur
                             cmd.SetGlobalTexture(ShaderConstants._HalfCoCTexture, data.cocTexture);
                             cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, data.sourceTexture);
-                            DrawFullscreenMesh(cmd, material, 2, data.renderingData.cameraData.xr.enabled);
+                            DrawFullscreenMesh(cmd, dofmaterial, 2, data.renderingData.cameraData.xr.enabled);
                         });
                     }
 
@@ -396,13 +612,13 @@ namespace UnityEngine.Rendering.Universal
 
                         builder.SetRenderFunc((DoFGaussianPassData data, RenderGraphContext context) =>
                         {
-                            var material = data.material;
+                            var dofmaterial = data.material;
                             var cmd = data.renderingData.commandBuffer;
 
                             // Blur
                             cmd.SetGlobalTexture(ShaderConstants._HalfCoCTexture, data.cocTexture);
                             cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, data.sourceTexture);
-                            DrawFullscreenMesh(cmd, material, 3, data.renderingData.cameraData.xr.enabled);
+                            DrawFullscreenMesh(cmd, dofmaterial, 3, data.renderingData.cameraData.xr.enabled);
                         });
                     }
 
@@ -421,14 +637,14 @@ namespace UnityEngine.Rendering.Universal
 
                         builder.SetRenderFunc((DoFGaussianPassData data, RenderGraphContext context) =>
                         {
-                            var material = data.material;
+                            var dofmaterial = data.material;
                             var cmd = data.renderingData.commandBuffer;
 
                             // Composite
                             cmd.SetGlobalTexture(ShaderConstants._ColorTexture, data.colorTexture);
                             cmd.SetGlobalTexture(ShaderConstants._FullCoCTexture, data.cocTexture);
                             cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, data.sourceTexture);
-                            DrawFullscreenMesh(cmd, material, 4, data.renderingData.cameraData.xr.enabled);
+                            DrawFullscreenMesh(cmd, dofmaterial, 4, data.renderingData.cameraData.xr.enabled);
                         });
                     }
                 }
@@ -447,11 +663,11 @@ namespace UnityEngine.Rendering.Universal
                     float maxCoC = (A * F) / (P - F);
                     float maxRadius = GetMaxBokehRadiusInPixels(cameraTargetDescriptor.height);
                     float rcpAspect = 1f / (wh / (float)hh);
-                    var cmd = renderingData.commandBuffer;
+                    var tempcmd = renderingData.commandBuffer;
 
                     CoreUtils.SetKeyword(material, ShaderKeywordStrings.UseFastSRGBLinearConversion, m_UseFastSRGBLinearConversion);
                     // TODO RENDERGRAPH: should not call cmd here, move it into render graph renderfunc
-                    cmd.SetGlobalVector(ShaderConstants._CoCParams, new Vector4(P, maxCoC, maxRadius, rcpAspect));
+                    tempcmd.SetGlobalVector(ShaderConstants._CoCParams, new Vector4(P, maxCoC, maxRadius, rcpAspect));
 
                     // Prepare the bokeh kernel constant buffer
                     int hash = m_DepthOfField.GetHashCode();
@@ -464,7 +680,7 @@ namespace UnityEngine.Rendering.Universal
                     }
 
                     // TODO RENDERGRAPH: should not call cmd here, move it into render graph renderfunc
-                    cmd.SetGlobalVectorArray(ShaderConstants._BokehKernel, m_BokehKernel);
+                    tempcmd.SetGlobalVectorArray(ShaderConstants._BokehKernel, m_BokehKernel);
 
                     // Temporary textures
                     // TODO RENDERGRAPH: FilterMode.Bilinear
@@ -476,10 +692,10 @@ namespace UnityEngine.Rendering.Universal
                     var pongTexture = UniversalRenderer.CreateRenderGraphTexture(graph, pongTextureDesc, "_PongTexture", true);
 
                     // TODO RENDERGRAPH: should not call cmd here, move it into render graph renderfunc
-                    PostProcessUtils.SetSourceSize(cmd, m_Descriptor);
-                    cmd.SetGlobalVector(ShaderConstants._DownSampleScaleFactor, new Vector4(1.0f / downSample, 1.0f / downSample, downSample, downSample));
-                    float uvMargin = (1.0f / m_Descriptor.height) * downSample;
-                    cmd.SetGlobalVector(ShaderConstants._BokehConstants, new Vector4(uvMargin, uvMargin * 2.0f));
+                    PostProcessUtils.SetSourceSize(tempcmd, cameraTargetDescriptor);
+                    tempcmd.SetGlobalVector(ShaderConstants._DownSampleScaleFactor, new Vector4(1.0f / downSample, 1.0f / downSample, downSample, downSample));
+                    float uvMargin = (1.0f / cameraTargetDescriptor.height) * downSample;
+                    tempcmd.SetGlobalVector(ShaderConstants._BokehConstants, new Vector4(uvMargin, uvMargin * 2.0f));
 
                     using (var builder = graph.AddRenderPass<DoFBokehPassData>("Depth of Field - Compute CoC", out var passData, ProfilingSampler.Get(markerName)))
                     {
@@ -493,12 +709,12 @@ namespace UnityEngine.Rendering.Universal
 
                         builder.SetRenderFunc((DoFBokehPassData data, RenderGraphContext context) =>
                         {
-                            var material = data.material;
+                            var dofmaterial = data.material;
                             var cmd = data.renderingData.commandBuffer;
 
                             // Compute CoC
                             cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, data.sourceTexture);
-                            DrawFullscreenMesh(cmd, material, 0, data.renderingData.cameraData.xr.enabled);
+                            DrawFullscreenMesh(cmd, dofmaterial, 0, data.renderingData.cameraData.xr.enabled);
                         });
                     }
 
@@ -515,12 +731,12 @@ namespace UnityEngine.Rendering.Universal
 
                         builder.SetRenderFunc((DoFBokehPassData data, RenderGraphContext context) =>
                         {
-                            var material = data.material;
+                            var dofmaterial = data.material;
                             var cmd = data.renderingData.commandBuffer;
 
                             // Downscale & prefilter color + coc
                             cmd.SetGlobalTexture(ShaderConstants._FullCoCTexture, data.cocTexture);
-                            DrawFullscreenMesh(cmd, material, 1, data.renderingData.cameraData.xr.enabled);
+                            DrawFullscreenMesh(cmd, dofmaterial, 1, data.renderingData.cameraData.xr.enabled);
                         });
                     }
 
@@ -536,12 +752,12 @@ namespace UnityEngine.Rendering.Universal
 
                         builder.SetRenderFunc((DoFBokehPassData data, RenderGraphContext context) =>
                         {
-                            var material = data.material;
+                            var dofmaterial = data.material;
                             var cmd = data.renderingData.commandBuffer;
 
                             // Downscale & prefilter color + coc
                             cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, data.sourceTexture);
-                            DrawFullscreenMesh(cmd, material, 2, data.renderingData.cameraData.xr.enabled);
+                            DrawFullscreenMesh(cmd, dofmaterial, 2, data.renderingData.cameraData.xr.enabled);
                         });
                     }
 
@@ -557,13 +773,13 @@ namespace UnityEngine.Rendering.Universal
 
                         builder.SetRenderFunc((DoFBokehPassData data, RenderGraphContext context) =>
                         {
-                            var material = data.material;
+                            var dofmaterial = data.material;
                             var cmd = data.renderingData.commandBuffer;
 
                             // Post - filtering
                             // TODO RENDERGRAPH: Look into loadstore op in BlitDstDiscardContent
                             cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, data.sourceTexture);
-                            DrawFullscreenMesh(cmd, material, 3, data.renderingData.cameraData.xr.enabled);
+                            DrawFullscreenMesh(cmd, dofmaterial, 3, data.renderingData.cameraData.xr.enabled);
                         });
                     }
 
@@ -581,14 +797,14 @@ namespace UnityEngine.Rendering.Universal
 
                         builder.SetRenderFunc((DoFBokehPassData data, RenderGraphContext context) =>
                         {
-                            var material = data.material;
+                            var dofmaterial = data.material;
                             var cmd = data.renderingData.commandBuffer;
 
                             // Composite
                             // TODO RENDERGRAPH: Look into loadstore op in BlitDstDiscardContent
                             cmd.SetGlobalTexture(ShaderConstants._DofTexture, data.dofTexture);
                             cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, data.sourceTexture);
-                            DrawFullscreenMesh(cmd, material, 4, data.renderingData.cameraData.xr.enabled);
+                            DrawFullscreenMesh(cmd, dofmaterial, 4, data.renderingData.cameraData.xr.enabled);
                         });
                     }
                 }
@@ -610,7 +826,6 @@ namespace UnityEngine.Rendering.Universal
             m_PaniniProjection = stack.GetComponent<PaniniProjection>();
 
             var camera = renderingData.cameraData.camera;
-            var cmd = renderingData.commandBuffer;
             var cameraData = renderingData.cameraData;
             var graph = renderingData.renderGraph;
             bool isSceneViewCamera = cameraData.isSceneViewCamera;
@@ -690,22 +905,6 @@ namespace UnityEngine.Rendering.Universal
 
             if (useLensFlare)
             {
-                bool usePanini;
-                float paniniDistance;
-                float paniniCropToFit;
-                if (m_PaniniProjection.IsActive())
-                {
-                    usePanini = true;
-                    paniniDistance = m_PaniniProjection.distance.value;
-                    paniniCropToFit = m_PaniniProjection.cropToFit.value;
-                }
-                else
-                {
-                    usePanini = false;
-                    paniniDistance = 1.0f;
-                    paniniCropToFit = 1.0f;
-                }
-
                 var graph = renderingData.renderGraph;
                 using (var builder = graph.AddRenderPass<LensFlarePassData>("Lens Flare Pass", out var passData, ProfilingSampler.Get(URPProfileId.LensFlareDataDriven)))
                 {
@@ -713,9 +912,18 @@ namespace UnityEngine.Rendering.Universal
                     passData.destinationTexture = builder.WriteTexture(destination);
                     passData.renderingData = renderingData;
                     passData.material = m_Materials.lensFlareDataDriven;
-                    passData.usePanini = usePanini;
-                    passData.paniniDistance = paniniDistance;
-                    passData.paniniCropToFit = paniniCropToFit;
+                    if (m_PaniniProjection.IsActive())
+                    {
+                        passData.usePanini = true;
+                        passData.paniniDistance = m_PaniniProjection.distance.value;
+                        passData.paniniCropToFit = m_PaniniProjection.cropToFit.value;
+                    }
+                    else
+                    {
+                        passData.usePanini = false;
+                        passData.paniniDistance = 1.0f;
+                        passData.paniniCropToFit = 1.0f;
+                    }
 
                     // TODO RENDERGRAPH: culling? force culluing off for testing
                     builder.AllowPassCulling(false);
@@ -728,7 +936,7 @@ namespace UnityEngine.Rendering.Universal
                         var usePanini = data.usePanini;
                         var paniniDistance = data.paniniDistance;
                         var paniniCropToFit = data.paniniCropToFit;
-                        var destination = data.destinationTexture;
+                        var dest = data.destinationTexture;
                         var material = data.material;
 
                         var gpuView = camera.worldToCameraMatrix;
@@ -744,7 +952,7 @@ namespace UnityEngine.Rendering.Universal
                             true,
                             camera.transform.position,
                             gpuVP,
-                            cmd, destination,
+                            cmd, dest,
                             (Light light, Camera cam, Vector3 wo) => { return GetLensFlareLightAttenuation(light, cam, wo); },
                             ShaderConstants._FlareOcclusionTex, ShaderConstants._FlareOcclusionIndex,
                             ShaderConstants._FlareTex, ShaderConstants._FlareColorValue,
@@ -772,8 +980,6 @@ namespace UnityEngine.Rendering.Universal
             // FSR color onversion or FXAA
             var graph = renderingData.renderGraph;
             UniversalRenderer renderer = (UniversalRenderer)renderingData.cameraData.renderer;
-            bool isFxaaEnabled = performFXAA;
-            bool doLateFsrColorConversion = performColorConversion;
 
             using (var builder = graph.AddRenderPass<PostProcessingFinalSetupPassData>("Postprocessing Final Blit Pass", out var passData, ProfilingSampler.Get(URPProfileId.DrawFullscreen)))
             {
@@ -781,8 +987,8 @@ namespace UnityEngine.Rendering.Universal
                 passData.sourceTexture = builder.ReadTexture(source);
                 passData.renderingData = renderingData;
                 passData.material = m_Materials.scalingSetup;
-                passData.isFxaaEnabled = isFxaaEnabled;
-                passData.doLateFsrColorConversion = doLateFsrColorConversion;
+                passData.isFxaaEnabled = performFXAA;
+                passData.doLateFsrColorConversion = performColorConversion;
 
                 // TODO RENDERGRAPH: culling? force culluing off for testing
                 builder.AllowPassCulling(false);
@@ -792,7 +998,7 @@ namespace UnityEngine.Rendering.Universal
                     var cmd = data.renderingData.commandBuffer;
                     var cameraData = data.renderingData.cameraData;
                     var camera = data.renderingData.cameraData.camera;
-                    var source = data.sourceTexture;
+                    var sourceTexture = data.sourceTexture;
                     var material = data.material;
                     var isFxaaEnabled = data.isFxaaEnabled;
                     var doLateFsrColorConversion = data.doLateFsrColorConversion;
@@ -807,7 +1013,7 @@ namespace UnityEngine.Rendering.Universal
                         material.EnableKeyword(ShaderKeywordStrings.Gamma20);
                     }
 
-                    cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, source);
+                    cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, sourceTexture);
                     DrawFullscreenMesh(cmd, material, 0, data.renderingData.cameraData.xr.enabled);
                     //RenderingUtils.ReAllocateIfNeeded(ref m_ScalingSetupTarget, tempRtDesc, FilterMode.Point, TextureWrapMode.Clamp, name: "_ScalingSetupTexture");
                 });
@@ -846,18 +1052,18 @@ namespace UnityEngine.Rendering.Universal
                     var cmd = data.renderingData.commandBuffer;
                     var cameraData = data.renderingData.cameraData;
                     var camera = data.renderingData.cameraData.camera;
-                    var source = data.sourceTexture;
-                    var destination = data.destinationTexture;
+                    var sourceTex = data.sourceTexture;
+                    var destTex = data.destinationTexture;
                     var material = data.material;
-                    RTHandle sourceHdl = (RTHandle)source;
-                    RTHandle destHdl = (RTHandle)destination;
+                    RTHandle sourceHdl = (RTHandle)sourceTex;
+                    RTHandle destHdl = (RTHandle)destTex;
 
                     // TODO RENDERGRAPH: dynamic resolution? used scaled size instead?
                     var fsrInputSize = new Vector2(sourceHdl.referenceSize.x, sourceHdl.referenceSize.y);
                     var fsrOutputSize = new Vector2(destHdl.referenceSize.x, destHdl.referenceSize.x);
                     FSRUtils.SetEasuConstants(cmd, fsrInputSize, fsrInputSize, fsrOutputSize);
 
-                    cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, source);
+                    cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, sourceTex);
                     DrawFullscreenMesh(cmd, material, 0, data.renderingData.cameraData.xr.enabled);
 
                     // RCAS
@@ -889,7 +1095,6 @@ namespace UnityEngine.Rendering.Universal
         {
             var graph = renderingData.renderGraph;
             UniversalRenderer renderer = (UniversalRenderer)renderingData.cameraData.renderer;
-            bool isFxaaEnabled = performFXAA;
 
             using (var builder = graph.AddRenderPass<PostProcessingFinalBlitPassData>("Postprocessing Final Blit Pass", out var passData, ProfilingSampler.Get(URPProfileId.DrawFullscreen)))
             {
@@ -897,7 +1102,7 @@ namespace UnityEngine.Rendering.Universal
                 passData.sourceTexture = builder.ReadTexture(source);
                 passData.renderingData = renderingData;
                 passData.material = m_Materials.finalPass;
-                passData.isFxaaEnabled = isFxaaEnabled;
+                passData.isFxaaEnabled = performFXAA;
 
                 // TODO RENDERGRAPH: culling? force culluing off for testing
                 builder.AllowPassCulling(false);
@@ -907,14 +1112,14 @@ namespace UnityEngine.Rendering.Universal
                     var cmd = data.renderingData.commandBuffer;
                     var cameraData = data.renderingData.cameraData;
                     var camera = data.renderingData.cameraData.camera;
-                    var source = data.sourceTexture;
+                    var sourceTex = data.sourceTexture;
                     var material = data.material;
                     var isFxaaEnabled = data.isFxaaEnabled;
 
                     if (isFxaaEnabled)
                         material.EnableKeyword(ShaderKeywordStrings.Fxaa);
 
-                    cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, source);
+                    cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, sourceTex);
 
                     // TODO RENDERGRAPH: missing load store op handling
 #if ENABLE_VR && ENABLE_XR_MODULE
