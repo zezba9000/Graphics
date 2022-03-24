@@ -886,6 +886,99 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
+        public class MotionBlurPassData
+        {
+            public TextureHandle destinationTexture;
+            public TextureHandle sourceTexture;
+            public RenderingData renderingData;
+            public Material material;
+            public int passIndex;
+        }
+
+        public void RenderMotionBlur(in TextureHandle source, out TextureHandle destination, ref RenderingData renderingData)
+        {
+            var cameraData = renderingData.cameraData;
+            var material = m_Materials.cameraMotionBlur;
+            var graph = renderingData.renderGraph;
+
+            var cameraTargetDescriptor = cameraData.cameraTargetDescriptor;
+            var desc = PostProcessPass.GetCompatibleDescriptor(cameraTargetDescriptor,
+                cameraTargetDescriptor.width,
+                cameraTargetDescriptor.height,
+                cameraTargetDescriptor.graphicsFormat,
+                DepthBits.None);
+
+            destination = UniversalRenderer.CreateRenderGraphTexture(graph, desc, "_MotionBlurTarget", true);
+
+#if ENABLE_VR && ENABLE_XR_MODULE
+            if (cameraData.xr.enabled && cameraData.xr.singlePassEnabled)
+            {
+                var viewProj0 = GL.GetGPUProjectionMatrix(cameraData.GetProjectionMatrix(0), true) * cameraData.GetViewMatrix(0);
+                var viewProj1 = GL.GetGPUProjectionMatrix(cameraData.GetProjectionMatrix(1), true) * cameraData.GetViewMatrix(1);
+                if (m_ResetHistory)
+                {
+                    viewProjMatrixStereo[0] = viewProj0;
+                    viewProjMatrixStereo[1] = viewProj1;
+                    material.SetMatrixArray("_PrevViewProjMStereo", viewProjMatrixStereo);
+                }
+                else
+                    material.SetMatrixArray("_PrevViewProjMStereo", m_PrevViewProjM);
+
+                m_PrevViewProjM[0] = viewProj0;
+                m_PrevViewProjM[1] = viewProj1;
+            }
+            else
+#endif
+            {
+                int prevViewProjMIdx = 0;
+#if ENABLE_VR && ENABLE_XR_MODULE
+                if (cameraData.xr.enabled)
+                    prevViewProjMIdx = cameraData.xr.multipassId;
+#endif
+                // This is needed because Blit will reset viewproj matrices to identity and UniversalRP currently
+                // relies on SetupCameraProperties instead of handling its own matrices.
+                // TODO: We need get rid of SetupCameraProperties and setup camera matrices in Universal
+                var proj = cameraData.GetProjectionMatrix();
+                var view = cameraData.GetViewMatrix();
+                var viewProj = proj * view;
+
+                material.SetMatrix("_ViewProjM", viewProj);
+
+                if (m_ResetHistory)
+                    material.SetMatrix("_PrevViewProjM", viewProj);
+                else
+                    material.SetMatrix("_PrevViewProjM", m_PrevViewProjM[prevViewProjMIdx]);
+
+                m_PrevViewProjM[prevViewProjMIdx] = viewProj;
+            }
+
+            material.SetFloat("_Intensity", m_MotionBlur.intensity.value);
+            material.SetFloat("_Clamp", m_MotionBlur.clamp.value);
+
+            using (var builder = graph.AddRenderPass<MotionBlurPassData>("Panini Projection", out var passData, ProfilingSampler.Get(URPProfileId.PaniniProjection)))
+            {
+                passData.destinationTexture = builder.UseColorBuffer(destination, 0);
+                passData.sourceTexture = builder.ReadTexture(source);
+                passData.renderingData = renderingData;
+                passData.material = material;
+                passData.passIndex = (int)m_MotionBlur.quality.value;
+                // TODO RENDERGRAPH: culling? force culluing off for testing
+                builder.AllowPassCulling(false);
+
+                builder.SetRenderFunc((MotionBlurPassData data, RenderGraphContext context) =>
+                {
+                    var cmd = data.renderingData.commandBuffer;
+                    var sourceDesc = data.renderingData.cameraData.cameraTargetDescriptor;
+                    PostProcessUtils.SetSourceSize(cmd, sourceDesc);
+                    // TODO RENDERGRAPH: BlitDstDiscardContent
+                    cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, data.sourceTexture);
+                    DrawFullscreenMesh(cmd, material, data.passIndex, data.renderingData.cameraData.xr.enabled);
+                });
+
+                return;
+            }
+        }
+
         public class LensFlarePassData
         {
             public TextureHandle destinationTexture;
@@ -1190,6 +1283,177 @@ namespace UnityEngine.Rendering.Universal
             }
 
             RenderFinalBlit(in currentSource, ref renderingData, isFxaaEnabled);
+        }
+
+
+        public class UberPostPassData
+        {
+            public TextureHandle destinationTexture;
+            public TextureHandle sourceTexture;
+            public Material material;
+            public RenderingData renderingData;
+        }
+
+        public void RenderUberPost(in TextureHandle sourceTexture, in TextureHandle destTexture, ref RenderingData renderingData)
+        {
+            var graph = renderingData.renderGraph;
+
+            using (var builder = graph.AddRenderPass<UberPostPassData>("Postprocessing Final Blit Pass", out var passData, ProfilingSampler.Get(URPProfileId.UberPostProcess)))
+            {
+                passData.destinationTexture = builder.UseColorBuffer(destTexture, 0);
+                passData.sourceTexture = builder.ReadTexture(sourceTexture);
+                passData.renderingData = renderingData;
+                passData.material = m_Materials.uber;
+
+                // TODO RENDERGRAPH: culling? force culluing off for testing
+                builder.AllowPassCulling(false);
+
+                builder.SetRenderFunc((UberPostPassData data, RenderGraphContext context) =>
+                {
+                    var cmd = data.renderingData.commandBuffer;
+                    var cameraData = data.renderingData.cameraData;
+                    var camera = data.renderingData.cameraData.camera;
+                    var sourceTex = data.sourceTexture;
+                    var material = data.material;
+
+                    // Done with Uber, blit it
+                    cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, sourceTex);
+
+#if ENABLE_VR && ENABLE_XR_MODULE
+                    if (cameraData.xr.enabled)
+                    {
+                        // TODO RENDERGRAPH: check split screen case
+                        //if (isRenderToBackBufferTarget)
+                        //    cmd.SetViewport(cameraData.pixelRect);
+
+                        bool yFlip = data.renderingData.cameraData.IsRenderTargetProjectionMatrixFlipped(data.destinationTexture);
+                        Vector4 scaleBias = yFlip ? new Vector4(1, -1, 0, 1) : new Vector4(1, 1, 0, 0);
+                        cmd.SetGlobalVector(ShaderPropertyId.scaleBias, scaleBias);
+                        cmd.DrawProcedural(Matrix4x4.identity, material, 0, MeshTopology.Quads, 4, 1, null);
+                    }
+                    else
+#endif
+                    {
+                        cmd.SetViewProjectionMatrices(Matrix4x4.identity, Matrix4x4.identity);
+                        // TODO RENDERGRAPH: check split screen case
+                        //if ((m_Destination.nameID == BuiltinRenderTextureType.CameraTarget && !m_UseSwapBuffer) || (m_ResolveToScreen && m_UseSwapBuffer))
+                        //    cmd.SetViewport(cameraData.pixelRect);
+
+                        cmd.DrawMesh(RenderingUtils.fullscreenMesh, Matrix4x4.identity, m_Materials.uber);
+
+                        cmd.SetViewProjectionMatrices(cameraData.camera.worldToCameraMatrix, cameraData.camera.projectionMatrix);
+                    }
+                });
+
+                return;
+            }
+        }
+
+        public void RenderPostPrcessingRenderGraph(in TextureHandle activeCameraColorTexture, in TextureHandle postProcessingTarget ,ref RenderingData renderingData)
+        {
+            ref CameraData cameraData = ref renderingData.cameraData;
+            ref ScriptableRenderer renderer = ref cameraData.renderer;
+            bool isSceneViewCamera = cameraData.isSceneViewCamera;
+
+            //We blit back and forth without msaa untill the last blit.
+            bool useStopNan = cameraData.isStopNaNEnabled && m_Materials.stopNaN != null;
+            bool useSubPixeMorpAA = cameraData.antialiasing == AntialiasingMode.SubpixelMorphologicalAntiAliasing && SystemInfo.graphicsDeviceType != GraphicsDeviceType.OpenGLES2;
+            var dofMaterial = m_DepthOfField.mode.value == DepthOfFieldMode.Gaussian ? m_Materials.gaussianDepthOfField : m_Materials.bokehDepthOfField;
+            bool useDepthOfField = m_DepthOfField.IsActive() && !isSceneViewCamera && dofMaterial != null;
+            bool useLensFlare = !LensFlareCommonSRP.Instance.IsEmpty();
+            bool useMotionBlur = m_MotionBlur.IsActive() && !isSceneViewCamera;
+            bool usePaniniProjection = m_PaniniProjection.IsActive() && !isSceneViewCamera;
+
+            // TODO RENDERGRAPH: MSAA handling
+            //int amountOfPassesRemaining = (useStopNan ? 1 : 0) + (useSubPixeMorpAA ? 1 : 0) + (useDepthOfField ? 1 : 0) + (useLensFlare ? 1 : 0) + (useMotionBlur ? 1 : 0) + (usePaniniProjection ? 1 : 0);
+            TextureHandle currentSource = activeCameraColorTexture;
+            if (useStopNan)
+            {
+                RenderStopNaN(in currentSource, out var stopNaNTarget, ref renderingData);
+                currentSource = stopNaNTarget;
+            }
+
+            if(useSubPixeMorpAA)
+            {
+                RenderSMAA(in currentSource, out var SMAATarget, ref renderingData);
+                currentSource = SMAATarget;
+            }
+
+            if(useDepthOfField)
+            {
+                RenderDoF(in currentSource, out var DoFTarget, ref renderingData);
+                currentSource = DoFTarget;
+            }
+
+            if(useMotionBlur)
+            {
+                RenderMotionBlur(in currentSource, out var MotionBlurTarget, ref renderingData);
+                currentSource = MotionBlurTarget;
+            }
+
+            if(usePaniniProjection)
+            {
+                RenderPaniniProjection(in currentSource, out var PaniniTarget, ref renderingData);
+                currentSource = PaniniTarget;
+            }
+
+            if(useLensFlare)
+            {
+                RenderLensFlareDatadriven(in currentSource, ref renderingData);
+            }
+
+            // Uberpost
+            {
+                // Reset uber keywords
+                m_Materials.uber.shaderKeywords = null;
+
+                // Bloom goes first
+                bool bloomActive = m_Bloom.IsActive();
+                if (bloomActive)
+                {
+                    RenderBloomTexture(currentSource, out var BloomTexture, ref renderingData);
+                    SetupBloomForUberMaterial(in BloomTexture, m_Materials.uber);
+                }
+
+                // Setup other effects constants
+                SetupLensDistortion(m_Materials.uber, isSceneViewCamera);
+                SetupChromaticAberration(m_Materials.uber);
+                SetupVignette(m_Materials.uber, cameraData.xr);
+
+                // TODO RENDERGRAPH: get rid of cmd here.
+                SetupColorGrading(renderingData.commandBuffer, ref renderingData, m_Materials.uber);
+
+                // Only apply dithering & grain if there isn't a final pass.
+                SetupGrain(cameraData, m_Materials.uber);
+                SetupDithering(cameraData, m_Materials.uber);
+
+                if (RequireSRGBConversionBlitToBackBuffer(cameraData))
+                    m_Materials.uber.EnableKeyword(ShaderKeywordStrings.LinearToSRGBConversion);
+
+                // When we're running FSR upscaling and there's no passes after this (including the FXAA pass), we can safely perform color conversion as part of uber post
+
+                // When FSR is active, we're required to provide it with input in a perceptual color space. Ideally, we can just do the color conversion as part of UberPost
+                // since FSR will *usually* be executed right after it. Unfortunately, there are a couple of situations where this is not true:
+                // 1. It's possible for users to add their own passes between UberPost and FinalPost. When user passes are present, we're unable to perform the conversion
+                //    here since it'd change the color space that the passes operate in which could lead to incorrect results.
+                // 2. When FXAA is enabled with FSR, FXAA is moved to an earlier pass to ensure that FSR sees fully anti-aliased input. The moved FXAA pass sits between
+                //    UberPost and FSR so we can no longer perform color conversion here without affecting other passes.
+                bool doEarlyFsrColorConversion = (!m_hasExternalPostPasses &&
+                                                  (((cameraData.imageScalingMode == ImageScalingMode.Upscaling) && (cameraData.upscalingFilter == ImageUpscalingFilter.FSR)) &&
+                                                   (cameraData.antialiasing != AntialiasingMode.FastApproximateAntialiasing)));
+                if (doEarlyFsrColorConversion)
+                {
+                    m_Materials.uber.EnableKeyword(ShaderKeywordStrings.Gamma20);
+                }
+
+                if (m_UseFastSRGBLinearConversion)
+                {
+                    m_Materials.uber.EnableKeyword(ShaderKeywordStrings.UseFastSRGBLinearConversion);
+                }
+
+                //GetActiveDebugHandler(renderingData)?.UpdateShaderGlobalPropertiesForFinalValidationPass(cmd, ref cameraData, !m_HasFinalPass);
+                RenderUberPost(in currentSource, in postProcessingTarget, ref renderingData);
+            }
         }
         #endregion
     }
