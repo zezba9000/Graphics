@@ -757,14 +757,123 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
-        public void RenderFinalSetup(in TextureHandle source, in TextureHandle destination, ref RenderingData renderingData)
+        public class PostProcessingFinalSetupPassData
         {
-            // FSR color onversion or FXAA
+            public TextureHandle destinationTexture;
+            public TextureHandle sourceTexture;
+            public Material material;
+            public RenderingData renderingData;
+            public bool isFxaaEnabled;
+            public bool doLateFsrColorConversion;
         }
 
-        public void RenderFinalScale(in TextureHandle source, in TextureHandle destination, ref RenderingData renderingData)
+        public void RenderFinalSetup(in TextureHandle source, in TextureHandle destination, ref RenderingData renderingData, bool performFXAA, bool performColorConversion)
+        {
+            // FSR color onversion or FXAA
+            var graph = renderingData.renderGraph;
+            UniversalRenderer renderer = (UniversalRenderer)renderingData.cameraData.renderer;
+            bool isFxaaEnabled = performFXAA;
+            bool doLateFsrColorConversion = performColorConversion;
+
+            using (var builder = graph.AddRenderPass<PostProcessingFinalSetupPassData>("Postprocessing Final Blit Pass", out var passData, ProfilingSampler.Get(URPProfileId.DrawFullscreen)))
+            {
+                passData.destinationTexture = builder.UseColorBuffer(destination, 0);
+                passData.sourceTexture = builder.ReadTexture(source);
+                passData.renderingData = renderingData;
+                passData.material = m_Materials.scalingSetup;
+                passData.isFxaaEnabled = isFxaaEnabled;
+                passData.doLateFsrColorConversion = doLateFsrColorConversion;
+
+                // TODO RENDERGRAPH: culling? force culluing off for testing
+                builder.AllowPassCulling(false);
+
+                builder.SetRenderFunc((PostProcessingFinalSetupPassData data, RenderGraphContext context) =>
+                {
+                    var cmd = data.renderingData.commandBuffer;
+                    var cameraData = data.renderingData.cameraData;
+                    var camera = data.renderingData.cameraData.camera;
+                    var source = data.sourceTexture;
+                    var material = data.material;
+                    var isFxaaEnabled = data.isFxaaEnabled;
+                    var doLateFsrColorConversion = data.doLateFsrColorConversion;
+
+                    if (isFxaaEnabled)
+                    {
+                        material.EnableKeyword(ShaderKeywordStrings.Fxaa);
+                    }
+
+                    if (doLateFsrColorConversion)
+                    {
+                        material.EnableKeyword(ShaderKeywordStrings.Gamma20);
+                    }
+
+                    cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, source);
+                    DrawFullscreenMesh(cmd, material, 0, data.renderingData.cameraData.xr.enabled);
+                    //RenderingUtils.ReAllocateIfNeeded(ref m_ScalingSetupTarget, tempRtDesc, FilterMode.Point, TextureWrapMode.Clamp, name: "_ScalingSetupTexture");
+                });
+                return;
+            }
+        }
+
+        public class PostProcessingFinalFSRScalePassData
+        {
+            public TextureHandle destinationTexture;
+            public TextureHandle sourceTexture;
+            public Material material;
+            public RenderingData renderingData;
+
+        }
+
+        public void RenderFinalFSRScale(in TextureHandle source, in TextureHandle destination, ref RenderingData renderingData)
         {
             // FSR upscale
+            var graph = renderingData.renderGraph;
+            UniversalRenderer renderer = (UniversalRenderer)renderingData.cameraData.renderer;
+            m_Materials.easu.shaderKeywords = null;
+
+            using (var builder = graph.AddRenderPass<PostProcessingFinalFSRScalePassData>("Postprocessing Final Blit Pass", out var passData, ProfilingSampler.Get(URPProfileId.DrawFullscreen)))
+            {
+                passData.destinationTexture = builder.UseColorBuffer(destination, 0);
+                passData.sourceTexture = builder.ReadTexture(source);
+                passData.renderingData = renderingData;
+                passData.material = m_Materials.easu;
+
+                // TODO RENDERGRAPH: culling? force culluing off for testing
+                builder.AllowPassCulling(false);
+
+                builder.SetRenderFunc((PostProcessingFinalFSRScalePassData data, RenderGraphContext context) =>
+                {
+                    var cmd = data.renderingData.commandBuffer;
+                    var cameraData = data.renderingData.cameraData;
+                    var camera = data.renderingData.cameraData.camera;
+                    var source = data.sourceTexture;
+                    var destination = data.destinationTexture;
+                    var material = data.material;
+                    RTHandle sourceHdl = (RTHandle)source;
+                    RTHandle destHdl = (RTHandle)destination;
+
+                    // TODO RENDERGRAPH: dynamic resolution? used scaled size instead?
+                    var fsrInputSize = new Vector2(sourceHdl.referenceSize.x, sourceHdl.referenceSize.y);
+                    var fsrOutputSize = new Vector2(destHdl.referenceSize.x, destHdl.referenceSize.x);
+                    FSRUtils.SetEasuConstants(cmd, fsrInputSize, fsrInputSize, fsrOutputSize);
+
+                    cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, source);
+                    DrawFullscreenMesh(cmd, material, 0, data.renderingData.cameraData.xr.enabled);
+
+                    // RCAS
+                    // Use the override value if it's available, otherwise use the default.
+                    float sharpness = cameraData.fsrOverrideSharpness ? cameraData.fsrSharpness : FSRUtils.kDefaultSharpnessLinear;
+
+                    // Set up the parameters for the RCAS pass unless the sharpness value indicates that it wont have any effect.
+                    if (cameraData.fsrSharpness > 0.0f)
+                    {
+                        // RCAS is performed during the final post blit, but we set up the parameters here for better logical grouping.
+                        material.EnableKeyword(ShaderKeywordStrings.Rcas);
+                        FSRUtils.SetRcasConstantsLinear(cmd, sharpness);
+                    }
+                });
+                return;
+            }
         }
 
         public class PostProcessingFinalBlitPassData
@@ -773,18 +882,22 @@ namespace UnityEngine.Rendering.Universal
             public TextureHandle sourceTexture;
             public Material material;
             public RenderingData renderingData;
+            public bool isFxaaEnabled;
         }
 
-        public void RenderFinalBlit(in TextureHandle source, in TextureHandle destination, ref RenderingData renderingData)
+        public void RenderFinalBlit(in TextureHandle source, ref RenderingData renderingData, bool performFXAA)
         {
             var graph = renderingData.renderGraph;
             UniversalRenderer renderer = (UniversalRenderer)renderingData.cameraData.renderer;
+            bool isFxaaEnabled = performFXAA;
+
             using (var builder = graph.AddRenderPass<PostProcessingFinalBlitPassData>("Postprocessing Final Blit Pass", out var passData, ProfilingSampler.Get(URPProfileId.DrawFullscreen)))
             {
                 passData.destinationTexture = builder.UseColorBuffer(renderer.frameResources.backBufferColor, 0);
                 passData.sourceTexture = builder.ReadTexture(source);
                 passData.renderingData = renderingData;
                 passData.material = m_Materials.finalPass;
+                passData.isFxaaEnabled = isFxaaEnabled;
 
                 // TODO RENDERGRAPH: culling? force culluing off for testing
                 builder.AllowPassCulling(false);
@@ -796,9 +909,14 @@ namespace UnityEngine.Rendering.Universal
                     var camera = data.renderingData.cameraData.camera;
                     var source = data.sourceTexture;
                     var material = data.material;
+                    var isFxaaEnabled = data.isFxaaEnabled;
+
+                    if (isFxaaEnabled)
+                        material.EnableKeyword(ShaderKeywordStrings.Fxaa);
 
                     cmd.SetGlobalTexture(ShaderPropertyId.sourceTex, source);
 
+                    // TODO RENDERGRAPH: missing load store op handling
 #if ENABLE_VR && ENABLE_XR_MODULE
                     if (cameraData.xr.enabled)
                     {
@@ -824,6 +942,50 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
+        void RenderFinalPassRenderGraph(CommandBuffer cmd, in TextureHandle source, ref RenderingData renderingData)
+        {
+            var graph = renderingData.renderGraph;
+            ref var cameraData = ref renderingData.cameraData;
+            var material = m_Materials.finalPass;
+            material.shaderKeywords = null;
+
+            SetupGrain(cameraData, material);
+            SetupDithering(cameraData, material);
+
+            if (RequireSRGBConversionBlitToBackBuffer(cameraData))
+                material.EnableKeyword(ShaderKeywordStrings.LinearToSRGBConversion);
+
+            GetActiveDebugHandler(renderingData)?.UpdateShaderGlobalPropertiesForFinalValidationPass(cmd, ref cameraData, !m_HasFinalPass);
+
+            bool isFxaaEnabled = (cameraData.antialiasing == AntialiasingMode.FastApproximateAntialiasing);
+            bool isFsrEnabled = ((cameraData.imageScalingMode == ImageScalingMode.Upscaling) && (cameraData.upscalingFilter == ImageUpscalingFilter.FSR));
+            bool doLateFsrColorConversion = (isFsrEnabled && (isFxaaEnabled || m_hasExternalPostPasses));
+            bool isSetupRequired = (isFxaaEnabled || doLateFsrColorConversion);
+
+            var tempRtDesc = cameraData.cameraTargetDescriptor;
+            tempRtDesc.msaaSamples = 1;
+            tempRtDesc.depthBufferBits = 0;
+            var scalingSetupTarget = UniversalRenderer.CreateRenderGraphTexture(graph, tempRtDesc, "scalingSetupTarget", true);
+            var upscaleRtDesc = tempRtDesc;
+            upscaleRtDesc.width = cameraData.pixelWidth;
+            upscaleRtDesc.height = cameraData.pixelHeight;
+            var upScaleTarget = UniversalRenderer.CreateRenderGraphTexture(graph, upscaleRtDesc, "_UpscaledTexture", true);
+
+            var currentSource = source;            
+            if (isSetupRequired)
+            {
+                RenderFinalSetup(in currentSource, in scalingSetupTarget, ref renderingData, true, doLateFsrColorConversion);
+                currentSource = scalingSetupTarget;
+            }
+
+            if (isFsrEnabled)
+            {
+                RenderFinalFSRScale(in currentSource, in upScaleTarget, ref renderingData);
+                currentSource = upScaleTarget;
+            }
+
+            RenderFinalBlit(in currentSource, ref renderingData, isFxaaEnabled);
+        }
         #endregion
     }
 }
