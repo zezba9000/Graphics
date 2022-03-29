@@ -1,1 +1,0 @@
--Copy paste now works between different windows of the same type.

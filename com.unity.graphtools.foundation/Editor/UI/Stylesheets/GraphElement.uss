@@ -1,3 +1,0 @@
-.ge-graph-element {
-    --minimap-color: var(--minimap-nodes);
-}

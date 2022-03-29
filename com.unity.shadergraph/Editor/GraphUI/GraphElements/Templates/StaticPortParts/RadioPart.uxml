@@ -1,3 +1,0 @@
-<UXML xmlns="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
-    <RadioButtonGroup name="sg-radio" />
-</UXML>

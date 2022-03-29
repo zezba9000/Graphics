@@ -1,3 +1,0 @@
-<UXML xmlns="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
-    <Toggle name="sg-bool-field"/>
-</UXML>

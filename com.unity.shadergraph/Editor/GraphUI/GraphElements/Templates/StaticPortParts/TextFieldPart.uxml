@@ -1,3 +1,0 @@
-<UXML xmlns="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
-    <TextField name="sg-textfield" />
-</UXML>

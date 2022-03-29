@@ -1,8 +1,0 @@
-.item-library-theme {
-    --search-placeholder-text-color: #828282;
-    --toggle-searcher-preview-on-image: resource("d_toggle_searcher_preview_on");
-    --toggle-searcher-preview-off-image: resource("d_toggle_searcher_preview_off");
-    --window-resizer-image: resource("d_resizer");
-    --favorite-disabled-image: resource("d_Favorite");
-    --favorite-enabled-image: resource("d_Favorite_colored");
-}
