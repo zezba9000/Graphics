@@ -1137,6 +1137,14 @@ namespace UnityEngine.Rendering.HighDefinition
             set => m_AffectDynamicGI = value;
         }
         
+        [SerializeField]
+        bool m_MixedDynamicGI = false;
+        public bool mixedDynamicGI
+        {
+            get => m_MixedDynamicGI;
+            set => m_MixedDynamicGI = value;
+        }
+        
         /// <summary>
         /// Returns a mask of light layers as uint and handle the case of Everything as being 0xFF and not -1
         /// </summary>

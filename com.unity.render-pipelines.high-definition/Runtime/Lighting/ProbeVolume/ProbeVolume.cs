@@ -1296,6 +1296,17 @@ namespace UnityEngine.Rendering.HighDefinition
             if (parameters.supportDynamicGI)
             {
                 ProbeVolumeDynamicGI.instance.ConstructNeighborData(m_ProbePositions, transform.rotation, ref probeVolumeAsset, in parameters, true);
+
+                // TODO: Do it for all lights once per scene bake when it's available instead of doing it after baking each volume.
+                foreach (var light in HDAdditionalLightData.s_InstancesHDAdditionalLightData)
+                {
+                    var mixedDynamicGI = light.lightmapBakeType == LightmapBakeType.Mixed;
+                    if (light.mixedDynamicGI != mixedDynamicGI)
+                    {
+                        light.mixedDynamicGI = mixedDynamicGI;
+                        UnityEditor.EditorUtility.SetDirty(light);
+                    }
+                }
             }
 
             UnityEditor.EditorUtility.SetDirty(probeVolumeAsset);

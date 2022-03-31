@@ -1459,7 +1459,7 @@ namespace UnityEngine.Rendering.HighDefinition
             // Fallback to the first non shadow casting directional light.
             m_CurrentSunLight = m_CurrentSunLight == null ? lightComponent : m_CurrentSunLight;
 
-            // TODO: only apply for real-time lights, but lightComponent.lightmapBakeType is not available outside in built players, Editor only...
+            // TODO: Do we care about it in shaders? Lights that don't affectDynamicGI are rejected in PreprocessDynamicGILights.
             lightData.affectDynamicGI = additionalLightData.affectDynamicGI ? 1 : 0;
 
             m_lightList.directionalLights.Add(lightData);
@@ -1628,7 +1628,7 @@ namespace UnityEngine.Rendering.HighDefinition
             lightData.screenSpaceShadowIndex = (int)LightDefinitions.s_InvalidScreenSpaceShadow;
             lightData.isRayTracedContactShadow = 0.0f;
 
-            // TODO: only apply for real-time lights, but lightComponent.lightmapBakeType is not available outside in built players, Editor only...
+            // TODO: Do we care about it in shaders? Lights that don't affectDynamicGI are rejected in PreprocessDynamicGILights.
             lightData.affectDynamicGI = additionalLightData.affectDynamicGI ? 1 : 0;
 
             if (lightComponent != null && additionalLightData != null &&
@@ -2549,7 +2549,7 @@ namespace UnityEngine.Rendering.HighDefinition
                 // Then we can reject lights based on processed data.
                 var additionalData = processedData.additionalLightData;
 
-                if (!additionalData.affectDynamicGI)
+                if (!additionalData.affectDynamicGI || additionalData.mixedDynamicGI)
                     continue;
 
                 // If the camera is in ray tracing mode and the light is disabled in ray tracing mode, we skip this light.
