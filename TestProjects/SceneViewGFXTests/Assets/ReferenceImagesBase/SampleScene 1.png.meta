@@ -1,5 +1,5 @@
 fileFormatVersion: 2
-guid: a7d29e60ae563464eb1761fc59a8a951
+guid: 98090688c7bd50547a65d9f7e03ffdf0
 TextureImporter:
   internalIDToNameTable: []
   externalObjects: {}
@@ -40,7 +40,7 @@ TextureImporter:
     wrapU: 0
     wrapV: 0
     wrapW: 0
-  nPOTScale: 1
+  nPOTScale: 0
   lightmap: 0
   compressionQuality: 50
   spriteMode: 0
@@ -116,7 +116,6 @@ TextureImporter:
     weights: []
     secondaryTextures: []
     nameFileIdTable: {}
-  spritePackingTag: 
   pSDRemoveMatte: 0
   userData: 
   assetBundleName: 
