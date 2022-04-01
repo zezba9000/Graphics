@@ -1,6 +1,6 @@
 projName: scene-view-gfx-tests
 editors:
-  - version: trunk
+  - version: 941928b624d9
 testplatforms:
   - name: editmode
     args: --suite=editor
@@ -8,6 +8,10 @@ testplatforms:
 win_apis:
   - name: DX12
     cmd: -force-d3d12
+  - name: DX11
+    cmd: -force-d3d11
+  - name: Vulkan
+    cmd: -force-vulkan
 linux_apis:
   - name: GLCore
     cmd: -force-glcore
