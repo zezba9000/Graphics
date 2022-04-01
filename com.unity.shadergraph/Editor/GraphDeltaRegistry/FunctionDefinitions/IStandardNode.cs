@@ -2,7 +2,6 @@ using System.Collections.Generic;
 
 namespace UnityEditor.ShaderGraph.Defs
 {
-
     internal interface IStandardNode
     {
         static string Name { get; }
@@ -11,6 +10,6 @@ namespace UnityEditor.ShaderGraph.Defs
         static NodeUIDescriptor NodeUIDescriptor { get; }
         static Dictionary<string, string> UIStrings { get; }
         static Dictionary<string, float> UIHints { get; }
+        static NodeDescriptor NodeDescriptor { get; }
     }
-
 }
