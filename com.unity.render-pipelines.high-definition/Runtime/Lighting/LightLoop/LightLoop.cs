@@ -2549,8 +2549,21 @@ namespace UnityEngine.Rendering.HighDefinition
                 // Then we can reject lights based on processed data.
                 var additionalData = processedData.additionalLightData;
 
-                if (!additionalData.affectDynamicGI || additionalData.mixedDynamicGI)
+                if (!additionalData.affectDynamicGI)
                     continue;
+                
+#if UNITY_EDITOR
+                if (ProbeVolume.prepareMixedLights)
+                {
+                    if (!additionalData.mixedDynamicGI)
+                        continue;
+                }
+                else
+#endif
+                {
+                    if (additionalData.mixedDynamicGI)
+                        continue;
+                }
 
                 // If the camera is in ray tracing mode and the light is disabled in ray tracing mode, we skip this light.
                 if (hdCamera.frameSettings.IsEnabled(FrameSettingsField.RayTracing) && !additionalData.includeForRayTracing)

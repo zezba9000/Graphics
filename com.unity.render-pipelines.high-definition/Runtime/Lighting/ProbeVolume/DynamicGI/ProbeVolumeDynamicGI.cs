@@ -17,6 +17,7 @@ namespace UnityEngine.Rendering.HighDefinition
         public uint albedoDistance;
         public uint normalAxis;
         public uint emission;
+        public uint mixedLighting;
     }
 
     [Serializable]
@@ -296,7 +297,7 @@ namespace UnityEngine.Rendering.HighDefinition
             return packedOutput;
         }
 
-        private static uint PackEmission(Vector3 color)
+        internal static uint PackEmission(Vector3 color)
         {
             var maxChannel = color.x > color.y ? color.x : color.y;
             maxChannel = maxChannel > color.z ? maxChannel : color.z;
@@ -598,14 +599,31 @@ namespace UnityEngine.Rendering.HighDefinition
 
             cmd.SetComputeBufferParam(shader, kernel, "_ProbeVolumeNeighborHits", propagationPipelineData.neighborHits);
             cmd.SetComputeIntParam(shader, "_ProbeVolumeNeighborHitCount", propagationPipelineData.neighborHits.count);
-            cmd.SetComputeFloatParam(shader, "_IndirectScale", giSettings.indirectMultiplier.value);
             cmd.SetComputeFloatParam(shader, "_MaxAlbedo", giSettings.maxAlbedo.value);
-            cmd.SetComputeFloatParam(shader, "_BakedEmissionMultiplier", giSettings.bakedEmissionMultiplier.value);
             cmd.SetComputeFloatParam(shader, "_RayBias", giSettings.bias.value);
             cmd.SetComputeFloatParam(shader, "_LeakMitigation", giSettings.leakMitigation.value);
             cmd.SetComputeFloatParam(shader, "_Sharpness", giSettings.sharpness.value);
             cmd.SetComputeVectorArrayParam(shader, "_RayAxis", s_NeighborAxis);
 
+            float infBounce;
+
+#if UNITY_EDITOR
+            if (ProbeVolume.prepareMixedLights)
+            {
+                cmd.SetComputeFloatParam(shader, "_IndirectScale", 1f);
+                cmd.SetComputeFloatParam(shader, "_BakedEmissionMultiplier", 0f);
+                cmd.SetComputeFloatParam(shader, "_MixedLightingMultiplier", 0f);
+                infBounce = 0f;
+            }
+            else
+#endif
+            {
+                cmd.SetComputeFloatParam(shader, "_IndirectScale", giSettings.indirectMultiplier.value);
+                cmd.SetComputeFloatParam(shader, "_BakedEmissionMultiplier", giSettings.bakedEmissionMultiplier.value);
+                cmd.SetComputeFloatParam(shader, "_MixedLightingMultiplier", 1f);
+                infBounce = infiniteBounces ? giSettings.infiniteBounce.value : 0f;
+            }
+            
             cmd.SetComputeFloatParam(shader, "_RangeBehindCamera", giSettings.rangeBehindCamera.value);
             cmd.SetComputeFloatParam(shader, "_RangeInFrontOfCamera", giSettings.rangeInFrontOfCamera.value);
 
@@ -617,7 +635,6 @@ namespace UnityEngine.Rendering.HighDefinition
             // TODO: replace with real one
             cmd.SetComputeTextureParam(shader, kernel, "_HierarchicalVarianceScreenSpaceShadowsTexture", TextureXR.GetWhiteTexture());
 
-            float infBounce = infiniteBounces ? giSettings.infiniteBounce.value : 0f;
             cmd.SetComputeFloatParam(shader, "_InfiniteBounce", infBounce);
             CoreUtils.SetKeyword(shader, "COMPUTE_INFINITE_BOUNCE", infBounce > 0);
             CoreUtils.SetKeyword(shader, "PREVIOUS_RADIANCE_CACHE_INVALID", previousRadianceCacheInvalid);

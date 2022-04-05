@@ -868,7 +868,7 @@ namespace UnityEngine.Rendering.HighDefinition
         public void IncrementDataVersion()
         {
             if (probeVolumeAsset != null)
-                probeVolumeAsset.dataVersion++;
+                probeVolumeAsset.dataVersion = unchecked(probeVolumeAsset.dataVersion + 1);
         }
 
         internal ProbeVolumePayload GetPayload()
@@ -1097,10 +1097,7 @@ namespace UnityEngine.Rendering.HighDefinition
                         parameters.resolutionX, parameters.resolutionY, parameters.resolutionZ);
                 }
 
-                unchecked
-                {
-                    probeVolumeAsset.dataVersion++;
-                }
+                IncrementDataVersion();
             }
 
             SetupProbePositions();
@@ -1209,16 +1206,9 @@ namespace UnityEngine.Rendering.HighDefinition
                     }
                 }
 
-                // if (UnityEditor.Lightmapping.giWorkflowMode != UnityEditor.Lightmapping.GIWorkflowMode.Iterative)
-                    UnityEditor.EditorUtility.SetDirty(probeVolumeAsset);
-
-                // TODO: Why do we need this? Let's try without it to speed baking up.
-                // UnityEditor.AssetDatabase.Refresh();
-
-                unchecked
-                {
-                    probeVolumeAsset.dataVersion++;
-                }
+                IncrementDataVersion();
+                UnityEditor.EditorUtility.SetDirty(probeVolumeAsset);
+                
                 dataNeedsDilation = true;
             }
             else
@@ -1252,12 +1242,9 @@ namespace UnityEngine.Rendering.HighDefinition
                 ProbeVolumeDynamicGI.instance.ConstructNeighborData(m_ProbePositions, transform.rotation, ref probeVolumeAsset, in parameters, false);
             }
 
+            IncrementDataVersion();
             UnityEditor.EditorUtility.SetDirty(probeVolumeAsset);
 
-            unchecked
-            {
-                probeVolumeAsset.dataVersion++;
-            }
             dataNeedsDilation = false;
         }
 
@@ -1296,26 +1283,31 @@ namespace UnityEngine.Rendering.HighDefinition
             if (parameters.supportDynamicGI)
             {
                 ProbeVolumeDynamicGI.instance.ConstructNeighborData(m_ProbePositions, transform.rotation, ref probeVolumeAsset, in parameters, true);
-
-                // TODO: Do it for all lights once per scene bake when it's available instead of doing it after baking each volume.
-                foreach (var light in HDAdditionalLightData.s_InstancesHDAdditionalLightData)
-                {
-                    var mixedDynamicGI = light.lightmapBakeType == LightmapBakeType.Mixed;
-                    if (light.mixedDynamicGI != mixedDynamicGI)
-                    {
-                        light.mixedDynamicGI = mixedDynamicGI;
-                        UnityEditor.EditorUtility.SetDirty(light);
-                    }
-                }
             }
 
+            IncrementDataVersion();
             UnityEditor.EditorUtility.SetDirty(probeVolumeAsset);
 
-            unchecked
-            {
-                probeVolumeAsset.dataVersion++;
-            }
             dataNeedsDilation = false;
+        }
+
+        internal void CopyDirectLightingToMixed()
+        {
+            var hits = probeVolumeAsset?.payload.hitNeighborAxis;
+            if (hits == null || hits.Length == 0)
+                return;
+            
+            var hitRadianceCache = propagationPipelineData.hitRadianceCache;
+            if (hitRadianceCache == null || hitRadianceCache.count != hits.Length)
+                return;
+            
+            var hitRandiance = new Vector3[hits.Length];
+            hitRadianceCache.GetData(hitRandiance);
+            for (int i = 0; i < hits.Length; i++)
+                hits[i].mixedLighting = ProbeVolumeDynamicGI.PackEmission(hitRandiance[i]);
+
+            IncrementDataVersion();
+            UnityEditor.EditorUtility.SetDirty(probeVolumeAsset);
         }
 
         private static ProbeVolumeSettingsKey ComputeProbeVolumeSettingsKeyFromProbeVolume(ProbeVolume probeVolume)
@@ -1625,6 +1617,28 @@ namespace UnityEngine.Rendering.HighDefinition
             );
 
             return new Vector4(probeOctahedralDepthScale2D.x, probeOctahedralDepthScale2D.y, probeOctahedralDepthIndex2D.x, probeOctahedralDepthIndex2D.y);
+        }
+
+        static bool s_PrepareMixedLights = false;
+        internal static bool prepareMixedLights
+        {
+            get => s_PrepareMixedLights;
+            set
+            {
+                s_PrepareMixedLights = value;
+                if (value)
+                {
+                    foreach (var light in HDAdditionalLightData.s_InstancesHDAdditionalLightData)
+                    {
+                        var mixedDynamicGI = light.lightmapBakeType == LightmapBakeType.Mixed;
+                        if (light.mixedDynamicGI != mixedDynamicGI)
+                        {
+                            light.mixedDynamicGI = mixedDynamicGI;
+                            UnityEditor.EditorUtility.SetDirty(light);
+                        }
+                    }
+                }
+            }
         }
 #endif
     }
